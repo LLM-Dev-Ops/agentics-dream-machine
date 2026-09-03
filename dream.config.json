@@ -1,5 +1,5 @@
 {
-  "repo": "ruvnet/dream-machine",
+  "repo": "LLM-Dev-Ops/agentics-dream-machine",
   "cron": "0 9 * * *",
   "slots": [
     {
