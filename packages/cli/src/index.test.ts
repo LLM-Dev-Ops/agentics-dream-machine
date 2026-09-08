@@ -222,6 +222,62 @@ describe('verify-entrypoint', () => {
   });
 });
 
+describe('verify-entrypoints', () => {
+  function mockIOWithExec(exec: IO['exec'], files: Record<string, string> = {}): IO {
+    return { ...mockIO(files), exec };
+  }
+
+  const cfgJson = JSON.stringify({
+    repo: 'o/n',
+    cron: '0 9 * * *',
+    slots: [{ deep: 'd', scan: ['a', 'b'] }],
+    evaluatorEntrypoints: { bench: 'npm test', darwin: 'npx @metaharness/darwin evolve --sandbox real' },
+  });
+
+  it('classifies every configured evaluatorEntrypoints and exits with the worst verdict', async () => {
+    const io = mockIOWithExec(async (cmd) => {
+      if (cmd === 'npm test') return { code: 0, stdout: '98 passed', stderr: '' };
+      return { code: 1, stdout: '', stderr: 'npm error could not determine executable to run' };
+    }, { 'dream.config.json': cfgJson });
+    const r = await run(['verify-entrypoints'], io);
+    expect(r.out).toContain('bench: live');
+    expect(r.out).toContain('darwin: blocked');
+    expect(r.code).toBe(1); // worst of live(0) and blocked(1)
+  });
+
+  it('exits 2 (worst) when any entrypoint is suspicious-silent, even if others are live', async () => {
+    const io = mockIOWithExec(async (cmd) => {
+      if (cmd === 'npm test') return { code: 0, stdout: '98 passed', stderr: '' };
+      return { code: 0, stdout: '', stderr: '' };
+    }, { 'dream.config.json': cfgJson });
+    const r = await run(['verify-entrypoints'], io);
+    expect(r.out).toContain('bench: live');
+    expect(r.out).toContain('darwin: suspicious-silent');
+    expect(r.code).toBe(2);
+  });
+
+  it('reads a config path given as the first positional', async () => {
+    const io = mockIOWithExec(async () => ({ code: 0, stdout: 'ok', stderr: '' }), { 'custom.json': cfgJson });
+    const r = await run(['verify-entrypoints', 'custom.json'], io);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('bench: live');
+  });
+
+  it('reports no entrypoints declared and exits 0 for an empty evaluatorEntrypoints', async () => {
+    const empty = JSON.stringify({ repo: 'o/n', cron: '0 9 * * *', slots: [{ deep: 'd', scan: ['a', 'b'] }] });
+    const io = mockIOWithExec(async () => ({ code: 0, stdout: '', stderr: '' }), { 'dream.config.json': empty });
+    const r = await run(['verify-entrypoints'], io);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('declares no evaluatorEntrypoints');
+  });
+
+  it('errors when the IO has no exec()', async () => {
+    const r = await run(['verify-entrypoints'], mockIO({ 'dream.config.json': cfgJson }));
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('no exec()');
+  });
+});
+
 describe('tui', () => {
   it('renders a dashboard from a ledger', async () => {
     const md = appendRow(emptyLedger(), sampleRow());

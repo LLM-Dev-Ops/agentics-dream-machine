@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyEntrypointResult } from './entrypoint.js';
+import { classifyEntrypointResult, classifyConfiguredEntrypoints } from './entrypoint.js';
 
 describe('classifyEntrypointResult', () => {
   it('flags a nonzero exit as blocked (reproduces npx @metaharness/flywheel: no bin field)', () => {
@@ -35,5 +35,40 @@ describe('classifyEntrypointResult', () => {
   it('treats exit 0 + stderr-only output as live (bench entrypoint may log to stderr)', () => {
     const r = classifyEntrypointResult({ code: 0, stdout: '', stderr: 'warning: slow test detected' });
     expect(r.verdict).toBe('live');
+  });
+});
+
+describe('classifyConfiguredEntrypoints', () => {
+  it('classifies every configured entrypoint, labelled with its key and command, in insertion order', async () => {
+    const calls: string[] = [];
+    const exec = async (cmd: string) => {
+      calls.push(cmd);
+      if (cmd === 'npm test') return { code: 0, stdout: '98 passed', stderr: '' };
+      return { code: 1, stdout: '', stderr: 'npm error could not determine executable to run' };
+    };
+    const results = await classifyConfiguredEntrypoints({ bench: 'npm test', darwin: 'npx @metaharness/darwin' }, exec);
+    expect(calls).toEqual(['npm test', 'npx @metaharness/darwin']);
+    expect(results).toEqual([
+      { label: 'bench', cmd: 'npm test', verdict: 'live', code: 0, reason: 'produced output' },
+      {
+        label: 'darwin',
+        cmd: 'npx @metaharness/darwin',
+        verdict: 'blocked',
+        code: 1,
+        reason: 'npm error could not determine executable to run',
+      },
+    ]);
+  });
+
+  it('skips entries with no configured command and never calls exec for them', async () => {
+    const exec = async (cmd: string) => ({ code: 0, stdout: cmd, stderr: '' });
+    const results = await classifyConfiguredEntrypoints({ bench: 'npm test', redblue: undefined }, exec);
+    expect(results.map((r) => r.label)).toEqual(['bench']);
+  });
+
+  it('reproduces tonight\'s redblue symlink-dispatch footgun through the configured-entrypoints path', async () => {
+    const exec = async () => ({ code: 0, stdout: '', stderr: '' });
+    const results = await classifyConfiguredEntrypoints({ redblue: 'npx @metaharness/redblue' }, exec);
+    expect(results[0].verdict).toBe('suspicious-silent');
   });
 });

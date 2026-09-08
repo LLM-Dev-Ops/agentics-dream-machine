@@ -18,7 +18,7 @@ import {
 import { stamp, verify, verifySteps } from '@dream-machine/witness';
 import { serializeRoutine, scheduleInstructions } from '@dream-machine/schedule';
 import { renderDashboard } from './tui.js';
-import { classifyEntrypointResult, type ExecResult } from './entrypoint.js';
+import { classifyEntrypointResult, classifyConfiguredEntrypoints, type ExecResult } from './entrypoint.js';
 
 export const VERSION = '0.1.1';
 
@@ -97,6 +97,7 @@ Commands:
   witness stamp   <report-file> <commit>               Compute the witness triple
   witness verify  <report-file> <commit> <witness>     Verify a claimed witness
   verify-entrypoint <label> --cmd "<command>"           Classify an evaluator entrypoint's liveness
+  verify-entrypoints [config]                           Classify every evaluatorEntrypoints in a dream.config
   tui             [--path LEDGER.md] [--no-color]      Render the dashboard
   version | --version                                  Print version
   help    | --help                                     This help
@@ -294,6 +295,28 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
         sink.log(`${label}: ${check.verdict} (exit ${check.code}) — ${check.reason}`);
         const code = check.verdict === 'live' ? 0 : check.verdict === 'blocked' ? 1 : 2;
         return { code, out: sink.out, err: sink.err };
+      }
+
+      case 'verify-entrypoints': {
+        if (!io.exec) {
+          sink.error('verify-entrypoints: this IO has no exec() — cannot run commands');
+          return { code: 1, out: sink.out, err: sink.err };
+        }
+        const cfgPath = _[1] || 'dream.config.json';
+        const cfg = await loadConfig(io, cfgPath);
+        const entrypoints = cfg.evaluatorEntrypoints ?? {};
+        const entries = Object.entries(entrypoints).filter(([, cmd]) => cmd);
+        if (entries.length === 0) {
+          sink.log(`verify-entrypoints: ${cfgPath} declares no evaluatorEntrypoints`);
+          return { code: 0, out: sink.out, err: sink.err };
+        }
+        const results = await classifyConfiguredEntrypoints(Object.fromEntries(entries), io.exec);
+        let worst = 0;
+        for (const r of results) {
+          sink.log(`${r.label}: ${r.verdict} (exit ${r.code}) — ${r.reason}`);
+          worst = Math.max(worst, r.verdict === 'live' ? 0 : r.verdict === 'blocked' ? 1 : 2);
+        }
+        return { code: worst, out: sink.out, err: sink.err };
       }
 
       case 'tui': {
