@@ -49,3 +49,30 @@ export function classifyEntrypointResult(r: ExecResult): EntrypointCheck {
   }
   return { verdict: 'live', code: r.code, reason: 'produced output' };
 }
+
+/** One configured evaluator entrypoint's classification, labelled with its config key + command. */
+export interface ConfiguredEntrypointResult extends EntrypointCheck {
+  label: string;
+  cmd: string;
+}
+
+/**
+ * Run every configured evaluatorEntrypoints command (e.g. from dream.config.json)
+ * through {@link classifyEntrypointResult}. This is the wiring ADR-0002 §3 named
+ * and explicitly deferred: "does not yet auto-wire evaluatorEntrypoints through
+ * the classifier inside the compiled prompt itself." Entries with no command are
+ * skipped. Execution order follows Object.entries insertion order; each command
+ * runs sequentially so a hanging entrypoint doesn't obscure which label stalled.
+ */
+export async function classifyConfiguredEntrypoints(
+  entrypoints: Record<string, string | undefined>,
+  exec: (cmd: string) => Promise<ExecResult>,
+): Promise<ConfiguredEntrypointResult[]> {
+  const results: ConfiguredEntrypointResult[] = [];
+  for (const [label, cmd] of Object.entries(entrypoints)) {
+    if (!cmd) continue;
+    const r = await exec(cmd);
+    results.push({ label, cmd, ...classifyEntrypointResult(r) });
+  }
+  return results;
+}
