@@ -129,9 +129,23 @@ describe('ledger', () => {
     expect(JSON.parse(r.out).ACCEPT).toBe(1);
     expect(JSON.parse(r.out).REJECT).toBe(1);
   });
-  it('signals', async () => {
+  it('signals reports merge data as unknown, not a false zero-merge positive, without --merged', async () => {
     const r = await run(['ledger', 'signals', '--path', 'L.md'], mockIO({ 'L.md': ledgerMd }));
-    expect(JSON.parse(r.out)).toHaveProperty('zeroMergeStreak');
+    const s = JSON.parse(r.out);
+    expect(s).toHaveProperty('zeroMergeStreak', false);
+    expect(s).toHaveProperty('mergeDataAvailable', false);
+  });
+  it('signals --merged supplies real merge data (both rows reference PR #181)', async () => {
+    const r = await run(['ledger', 'signals', '--path', 'L.md', '--merged', '#181,205'], mockIO({ 'L.md': ledgerMd }));
+    const s = JSON.parse(r.out);
+    expect(s).toHaveProperty('mergeDataAvailable', true);
+    expect(s).toHaveProperty('zeroMergeStreak', false);
+  });
+  it('signals --merged with a disjoint set correctly reports a real zero-merge streak', async () => {
+    const r = await run(['ledger', 'signals', '--path', 'L.md', '--merged', '999'], mockIO({ 'L.md': ledgerMd }));
+    const s = JSON.parse(r.out);
+    expect(s).toHaveProperty('mergeDataAvailable', true);
+    expect(s).toHaveProperty('zeroMergeStreak', true);
   });
   it('append writes a row (bootstraps ledger if missing)', async () => {
     const io = mockIO();
@@ -291,10 +305,25 @@ describe('tui', () => {
     const frame = renderDashboard(emptyLedger(), { noColor: true });
     expect(frame).toContain('no dream nights yet');
   });
-  it('shows a zero-merge warning', () => {
+  it('shows a zero-merge warning when merge data is supplied and confirms zero', () => {
+    let md = emptyLedger();
+    for (let i = 0; i < 14; i++) md = appendRow(md, sampleRow({ pr: `#${i}`, verdict: 'INCONCLUSIVE' }));
+    const frame = renderDashboard(md, { noColor: true, mergedPrNumbers: new Set() });
+    expect(frame).toContain('zero merges');
+  });
+  it('shows merge status as unknown, never a false zero-merge warning, without merge data', () => {
     let md = emptyLedger();
     for (let i = 0; i < 14; i++) md = appendRow(md, sampleRow({ pr: `#${i}`, verdict: 'INCONCLUSIVE' }));
     const frame = renderDashboard(md, { noColor: true });
-    expect(frame).toContain('zero merges');
+    expect(frame).toContain('merge status unknown');
+    expect(frame).not.toContain('zero merges');
+  });
+  it('CLI tui --merged flows through to the rendered dashboard', async () => {
+    let md = emptyLedger();
+    for (let i = 0; i < 14; i++) md = appendRow(md, sampleRow({ pr: `#${i}`, verdict: 'INCONCLUSIVE' }));
+    const r = await run(['tui', '--path', 'L.md', '--no-color', '--merged', '999'], mockIO({ 'L.md': md }));
+    expect(r.out).toContain('zero merges');
+    const r2 = await run(['tui', '--path', 'L.md', '--no-color'], mockIO({ 'L.md': md }));
+    expect(r2.out).toContain('merge status unknown');
   });
 });
