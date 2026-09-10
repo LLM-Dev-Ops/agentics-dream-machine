@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { compile, validateConfig, defaultConfig, withDefaults, type DreamConfig } from './index.js';
 
@@ -134,5 +137,27 @@ describe('defaults', () => {
     expect(c.ledgerPath).toBe('docs/dream-cycle/LEDGER.md');
     expect(c.branchPrefix).toBe('dream/');
     expect(c.labels).toContain('dream-cycle');
+  });
+});
+
+// Self-referential compiler-parity guard: the scheduler's authoritative copy
+// of the nightly routine is, by this repo's own design, a build output of
+// `compile(dream.config.json)` (see the compiled header's own disclaimer).
+// Nothing previously asserted that fact — only a synthetic `metaharness`
+// config was snapshot-tested. If `dream.config.json` ever changes without a
+// recompile, this is the test that turns that drift into a reviewable diff
+// instead of a silent divergence between the repo and the live scheduler.
+describe('self-referential compiler parity (this repo\'s own dream.config.json)', () => {
+  const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
+  const liveConfig: DreamConfig = JSON.parse(readFileSync(join(repoRoot, 'dream.config.json'), 'utf8'));
+
+  it('validates cleanly against the DreamConfig schema', () => {
+    const v = validateConfig(liveConfig);
+    expect(v.errors).toEqual([]);
+    expect(v.ok).toBe(true);
+  });
+
+  it('golden-snapshot: the live compiled nightly routine is stable', () => {
+    expect(compile(liveConfig)).toMatchSnapshot();
   });
 });
