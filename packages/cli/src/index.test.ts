@@ -133,6 +133,18 @@ describe('ledger', () => {
     const r = await run(['ledger', 'signals', '--path', 'L.md'], mockIO({ 'L.md': ledgerMd }));
     expect(JSON.parse(r.out)).toHaveProperty('zeroMergeStreak');
   });
+  it('signals defaults `today` to io.now() and surfaces ledger staleness', async () => {
+    const stale = appendRow(emptyLedger(), sampleRow({ date: '2026-08-10' }));
+    const r = await run(['ledger', 'signals', '--path', 'L.md'], mockIO({ 'L.md': stale }));
+    expect(JSON.parse(r.out).nightsSinceLastRow).toBe(3); // mockIO.now() === '2026-08-13'
+  });
+  it('signals --today overrides the injected clock', async () => {
+    const r = await run(
+      ['ledger', 'signals', '--path', 'L.md', '--today', '2026-08-20'],
+      mockIO({ 'L.md': ledgerMd }),
+    );
+    expect(JSON.parse(r.out).nightsSinceLastRow).toBe(6); // last row 2026-08-14 -> 2026-08-20
+  });
   it('append writes a row (bootstraps ledger if missing)', async () => {
     const io = mockIO();
     const r = await run(

@@ -147,6 +147,25 @@ describe('learning signals', () => {
     const { rows } = parseLedger(l);
     expect(learningSignals(rows).blockedEvalStreak).toBe(true);
   });
+
+  it('nightsSinceLastRow is null when `today` is not supplied', () => {
+    const { rows } = parseLedger(appendRow(emptyLedger(), row({ date: '2026-09-08' })));
+    expect(learningSignals(rows).nightsSinceLastRow).toBeNull();
+  });
+
+  it('nightsSinceLastRow is null on an empty ledger even with `today`', () => {
+    expect(learningSignals([], { today: '2026-09-11' }).nightsSinceLastRow).toBeNull();
+  });
+
+  it('nightsSinceLastRow is 0 when the last row is today', () => {
+    const { rows } = parseLedger(appendRow(emptyLedger(), row({ date: '2026-09-11' })));
+    expect(learningSignals(rows, { today: '2026-09-11' }).nightsSinceLastRow).toBe(0);
+  });
+
+  it('nightsSinceLastRow reports the real gap (this repo: 2026-09-08 -> 2026-09-11 is 3)', () => {
+    const { rows } = parseLedger(appendRow(emptyLedger(), row({ date: '2026-09-08' })));
+    expect(learningSignals(rows, { today: '2026-09-11' }).nightsSinceLastRow).toBe(3);
+  });
 });
 
 describe('verdictStats', () => {

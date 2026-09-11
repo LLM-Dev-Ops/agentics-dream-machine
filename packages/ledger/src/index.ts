@@ -191,6 +191,13 @@ export interface LearningSignals {
   blockedEvalStreak: boolean;
   /** Count of nights considered. */
   nightsConsidered: number;
+  /**
+   * Calendar nights between the last dated row and `today` (from `SignalOptions.today`).
+   * Null when `today` wasn't supplied, or the ledger has no dated row — never fabricated.
+   * A ledger's rows commonly land inside a still-open draft PR's branch rather than
+   * on `main`, so `main`'s ledger can silently lag several real nights behind.
+   */
+  nightsSinceLastRow: number | null;
 }
 
 export interface SignalOptions {
@@ -200,11 +207,23 @@ export interface SignalOptions {
   recentScores?: number[];
   /** Which PR numbers actually merged (so we can detect the zero-merge streak). */
   mergedPrNumbers?: Set<string>;
+  /** Today's date (YYYY-MM-DD), for ledger-staleness detection. Omit to skip the check. */
+  today?: string;
 }
 
 function prNumber(pr: string): string | null {
   const m = pr.match(/#?(\d+)/);
   return m ? m[1] : null;
+}
+
+/** UTC calendar-day difference `b - a`, or null if either isn't YYYY-MM-DD. */
+function daysBetweenUTC(a: string, b: string): number | null {
+  const ma = /^(\d{4})-(\d{2})-(\d{2})$/.exec(a);
+  const mb = /^(\d{4})-(\d{2})-(\d{2})$/.exec(b);
+  if (!ma || !mb) return null;
+  const da = Date.UTC(+ma[1], +ma[2] - 1, +ma[3]);
+  const db = Date.UTC(+mb[1], +mb[2] - 1, +mb[3]);
+  return Math.round((db - da) / 86_400_000);
 }
 
 /** Compute the STEP 1.1 learning signals from parsed rows. */
@@ -237,12 +256,25 @@ export function learningSignals(rows: LedgerRow[], opts: SignalOptions = {}): Le
   const blockedEvalStreak =
     recent.length >= 3 && lastThreeEvals.length === 3 && lastThreeEvals.every((e) => e === 'blocked');
 
+  // Ledger staleness: gap between the last dated row and `today`, when supplied.
+  let nightsSinceLastRow: number | null = null;
+  if (opts.today) {
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const d = daysBetweenUTC(rows[i].date, opts.today);
+      if (d !== null) {
+        nightsSinceLastRow = d;
+        break;
+      }
+    }
+  }
+
   return {
     zeroMergeStreak,
     duplicateDirections,
     lowScoreStreak,
     blockedEvalStreak,
     nightsConsidered: recent.length,
+    nightsSinceLastRow,
   };
 }
 
