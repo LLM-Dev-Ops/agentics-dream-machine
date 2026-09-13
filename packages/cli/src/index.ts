@@ -19,6 +19,7 @@ import { stamp, verify, verifySteps } from '@dream-machine/witness';
 import { serializeRoutine, scheduleInstructions } from '@dream-machine/schedule';
 import { renderDashboard } from './tui.js';
 import { classifyEntrypointResult, classifyConfiguredEntrypoints, type ExecResult } from './entrypoint.js';
+import { assessConfiguredSupplyChain } from './supplychain.js';
 
 export const VERSION = '0.1.1';
 
@@ -98,6 +99,7 @@ Commands:
   witness verify  <report-file> <commit> <witness>     Verify a claimed witness
   verify-entrypoint <label> --cmd "<command>"           Classify an evaluator entrypoint's liveness
   verify-entrypoints [config]                           Classify every evaluatorEntrypoints in a dream.config
+  verify-supply-chain [config]                          Flag unpinned npx evaluatorEntrypoints (no exec required)
   tui             [--path LEDGER.md] [--no-color]      Render the dashboard
   version | --version                                  Print version
   help    | --help                                     This help
@@ -317,6 +319,24 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
           worst = Math.max(worst, r.verdict === 'live' ? 0 : r.verdict === 'blocked' ? 1 : 2);
         }
         return { code: worst, out: sink.out, err: sink.err };
+      }
+
+      case 'verify-supply-chain': {
+        const cfgPath = _[1] || 'dream.config.json';
+        const cfg = await loadConfig(io, cfgPath);
+        const entrypoints = cfg.evaluatorEntrypoints ?? {};
+        const entries = Object.entries(entrypoints).filter(([, cmd]) => cmd);
+        if (entries.length === 0) {
+          sink.log(`verify-supply-chain: ${cfgPath} declares no evaluatorEntrypoints`);
+          return { code: 0, out: sink.out, err: sink.err };
+        }
+        const results = assessConfiguredSupplyChain(Object.fromEntries(entries));
+        let anyUnpinned = false;
+        for (const r of results) {
+          sink.log(`${r.label}: ${r.verdict} — ${r.reason}`);
+          if (r.verdict === 'unpinned') anyUnpinned = true;
+        }
+        return { code: anyUnpinned ? 1 : 0, out: sink.out, err: sink.err };
       }
 
       case 'tui': {

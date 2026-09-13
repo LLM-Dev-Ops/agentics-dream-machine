@@ -278,6 +278,55 @@ describe('verify-entrypoints', () => {
   });
 });
 
+describe('verify-supply-chain', () => {
+  const cfgJson = JSON.stringify({
+    repo: 'o/n',
+    cron: '0 9 * * *',
+    slots: [{ deep: 'd', scan: ['a', 'b'] }],
+    evaluatorEntrypoints: { bench: 'npm test', darwin: 'npx @metaharness/darwin evolve --sandbox real' },
+  });
+
+  it('flags an unpinned npx entrypoint and exits 1 (reproduces this repo\'s real darwin entrypoint)', async () => {
+    const r = await run(['verify-supply-chain'], mockIO({ 'dream.config.json': cfgJson }));
+    expect(r.out).toContain('bench: not-applicable');
+    expect(r.out).toContain('darwin: unpinned');
+    expect(r.code).toBe(1);
+  });
+
+  it('exits 0 once the entrypoint is version-pinned', async () => {
+    const pinned = JSON.stringify({
+      repo: 'o/n',
+      cron: '0 9 * * *',
+      slots: [{ deep: 'd', scan: ['a', 'b'] }],
+      evaluatorEntrypoints: { bench: 'npm test', darwin: 'npx @metaharness/darwin@0.10.2 evolve --sandbox real' },
+    });
+    const r = await run(['verify-supply-chain'], mockIO({ 'dream.config.json': pinned }));
+    expect(r.out).toContain('darwin: pinned');
+    expect(r.code).toBe(0);
+  });
+
+  it('requires no exec() on the IO — static analysis only', async () => {
+    const io: IO = { ...mockIO({ 'dream.config.json': cfgJson }) };
+    delete (io as { exec?: unknown }).exec;
+    const r = await run(['verify-supply-chain'], io);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('darwin: unpinned');
+  });
+
+  it('reads a config path given as the first positional', async () => {
+    const r = await run(['verify-supply-chain', 'custom.json'], mockIO({ 'custom.json': cfgJson }));
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('darwin: unpinned');
+  });
+
+  it('reports no entrypoints declared and exits 0 for an empty evaluatorEntrypoints', async () => {
+    const empty = JSON.stringify({ repo: 'o/n', cron: '0 9 * * *', slots: [{ deep: 'd', scan: ['a', 'b'] }] });
+    const r = await run(['verify-supply-chain'], mockIO({ 'dream.config.json': empty }));
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('declares no evaluatorEntrypoints');
+  });
+});
+
 describe('tui', () => {
   it('renders a dashboard from a ledger', async () => {
     const md = appendRow(emptyLedger(), sampleRow());
