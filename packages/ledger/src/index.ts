@@ -155,6 +155,26 @@ export interface VerifyResult {
   rowCount: number;
 }
 
+/**
+ * Validate a single row's field values against the same schema `verifyLedger`
+ * enforces (date format, verdict/evaluated enums) — shared so a row can be
+ * rejected at the moment it's about to be written, not only discovered later
+ * by a separate `ledger verify` pass over an already-corrupted file.
+ */
+export function validateRow(row: LedgerRow): string[] {
+  const errors: string[] = [];
+  if (row.verdict && !VERDICTS.includes(row.verdict)) {
+    errors.push(`verdict "${row.verdict}" not in ${VERDICTS.join('|')}`);
+  }
+  if (row.evaluated && !EVALS.includes(row.evaluated)) {
+    errors.push(`evaluated "${row.evaluated}" not in ${EVALS.join('|')}`);
+  }
+  if (row.date && !/^\d{4}-\d{2}-\d{2}$/.test(row.date)) {
+    errors.push(`date "${row.date}" is not YYYY-MM-DD`);
+  }
+  return errors;
+}
+
 /** Structurally verify a ledger: header present, verdicts/evaluated in range. */
 export function verifyLedger(markdown: string): VerifyResult {
   const errors: string[] = [];
@@ -163,15 +183,7 @@ export function verifyLedger(markdown: string): VerifyResult {
     errors.push('ledger is missing the Date header row');
   }
   rows.forEach((r, i) => {
-    if (r.verdict && !VERDICTS.includes(r.verdict)) {
-      errors.push(`row ${i + 1}: verdict "${r.verdict}" not in ${VERDICTS.join('|')}`);
-    }
-    if (r.evaluated && !EVALS.includes(r.evaluated)) {
-      errors.push(`row ${i + 1}: evaluated "${r.evaluated}" not in ${EVALS.join('|')}`);
-    }
-    if (r.date && !/^\d{4}-\d{2}-\d{2}$/.test(r.date)) {
-      errors.push(`row ${i + 1}: date "${r.date}" is not YYYY-MM-DD`);
-    }
+    for (const e of validateRow(r)) errors.push(`row ${i + 1}: ${e}`);
   });
   return { ok: errors.length === 0, errors, warnings, rowCount: rows.length };
 }

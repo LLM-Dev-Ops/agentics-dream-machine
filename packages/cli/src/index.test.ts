@@ -142,6 +142,46 @@ describe('ledger', () => {
     expect(r.code).toBe(0);
     expect(io.files['L.md']).toContain('| perf |');
   });
+
+  it('append refuses an invalid verdict and leaves the ledger file untouched', async () => {
+    const io = mockIO({ 'L.md': ledgerMd });
+    const before = io.files['L.md'];
+    const r = await run(
+      ['ledger', 'append', '--path', 'L.md', '--deep', 'perf', '--finding', 'x', '--verdict', 'NOT_A_VERDICT'],
+      io,
+    );
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('refusing to write an invalid row');
+    expect(r.err).toContain('verdict "NOT_A_VERDICT"');
+    expect(io.files['L.md']).toBe(before);
+  });
+
+  it('append refuses a malformed date and a bad evaluated value together', async () => {
+    const io = mockIO();
+    const r = await run(
+      [
+        'ledger',
+        'append',
+        '--path',
+        'L.md',
+        '--date',
+        'not-a-date',
+        '--deep',
+        'perf',
+        '--finding',
+        'x',
+        '--verdict',
+        'ACCEPT',
+        '--evaluated',
+        'maybe',
+      ],
+      io,
+    );
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('date "not-a-date"');
+    expect(r.err).toContain('evaluated "maybe"');
+    expect(io.files['L.md']).toBeUndefined();
+  });
 });
 
 describe('witness', () => {
