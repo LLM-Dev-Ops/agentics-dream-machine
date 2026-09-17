@@ -104,6 +104,13 @@ describe('compile', () => {
     }
   });
 
+  it('instructs routing evaluator entrypoint results through the liveness classifier before EVALUATED=yes', () => {
+    expect(prompt).toContain('verify-entrypoints');
+    expect(prompt).toContain('classifyEntrypointResult');
+    expect(prompt).toContain('suspicious-silent');
+    expect(prompt).toContain('exit 0 alone is not sufficient to record `EVALUATED=yes`');
+  });
+
   it('describes human-review-only merge policy by default', () => {
     expect(prompt).toContain('Human review required');
     expect(prompt).not.toContain('guarded auto-merge ENABLED');

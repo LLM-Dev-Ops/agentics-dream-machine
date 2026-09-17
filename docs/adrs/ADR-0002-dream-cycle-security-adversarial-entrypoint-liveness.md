@@ -58,10 +58,23 @@ this classifier before it is allowed to influence a night's `EVALUATED`/
   produces real output and classifies `live`, confirmed tonight.
 - **This is a detection primitive, not a fix.** It does not patch
   `@metaharness/redblue` (out of this repo's scope — a different repo,
-  `ruvnet/agent-harness-generator`) and does not yet auto-wire
-  `evaluatorEntrypoints` through the classifier inside the compiled prompt
-  itself — that wiring is next-step work, explicitly deferred rather than
-  rushed into tonight's already-scoped candidate.
+  `ruvnet/agent-harness-generator`).
+- **Update, 2026-09-17 (evaluation-adapters night, this repo):** the
+  "does not yet auto-wire `evaluatorEntrypoints` through the classifier
+  inside the compiled prompt itself" gap above is closed. `@dream-machine/compile`'s
+  STEP 5-9 template (`packages/compile/src/index.ts`) now explicitly instructs
+  the session to route every evaluator-entrypoint result through
+  `dream-machine verify-entrypoints`/`classifyEntrypointResult` before
+  recording `EVALUATED=yes`, and states the `suspicious-silent` verdict
+  blocks that claim. This closes the gap at the instruction level; it is
+  still not automatic (the compiled prompt directs an agent to run the
+  classifier, it does not run it for them) — a fully automatic wiring inside
+  `run()`/a pipeline harness remains unbuilt and is out of scope for this
+  config-compiler repo, which has no execution loop of its own to auto-run
+  the nightly steps it compiles. Verified live: the recompiled prompt for
+  this repo's own `dream.config.json` now contains the instruction
+  (`docs/dream-cycle/gists/2026-09-17-evaluation-adapters.md`). Status
+  remains `Proposed` pending human review of the wiring PR.
 - **New CLI surface** (`verify-entrypoint`) is additive and optional
   (`IO.exec` is `exec?`, so every existing IO/test fake is unaffected).
 
@@ -89,6 +102,10 @@ this classifier before it is allowed to influence a night's `EVALUATED`/
 2. `dream-machine verify-entrypoint` round-trips a real exec result through
    the classifier and exits 0/1/2 for live/blocked/suspicious-silent
    respectively (`packages/cli/src/index.test.ts`).
+2a. (2026-09-17) The compiled STEP 5-9 template contains `verify-entrypoints`,
+    `classifyEntrypointResult`, `suspicious-silent`, and the literal sentence
+    "exit 0 alone is not sufficient to record `EVALUATED=yes`" —
+    golden-snapshot tested (`packages/compile/src/index.test.ts`).
 3. Live receipt against this repo's real `dream.config.json`
    `evaluatorEntrypoints` tonight: `bench` → live, `flywheel` → blocked,
    `redblue` → suspicious-silent, `darwin --version` → blocked (wrong flag,
