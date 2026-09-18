@@ -10,25 +10,43 @@ unmerged, unreviewed draft PRs (`verify-entrypoints` in #8/closed-not-merged,
 `assessSupplyChainPin()` almost exactly. Tonight instead (a) reconfirms both
 scans against live state with fresh counts, and (b) escalates one finding
 with materially new evidence: **CodeQL has never once passed in this
-repository** — 0/30 runs green since the workflow was added
-(2026-09-03T20:35:27Z) through tonight, a fact issue #10 (filed 2026-09-08,
-5 data points) did not have. Root cause unchanged from #10's diagnosis: a
-repo-Settings gap ("Code Security must be enabled"), not a code defect — no
-diff this session can write fixes it. No new candidate PR opened tonight;
-one comment added to #10 with the full 30-run count, and this rotation's
-findings filed as a new issue cross-linking #10/#19/#20 rather than
-re-diagnosing what's already correctly diagnosed.
+repository** — as measured before this session's own PR, 0/30 runs green
+since the workflow was added (2026-09-03T20:35:27Z) through 2026-09-17, a
+fact issue #10 (filed 2026-09-08, 5 data points) did not have. An
+independent-critic re-check after this session's own PR (#28) pushed two
+more CodeQL runs found the true, current total is **0/32** — this session's
+own commits reproduced the same failure twice more, which is itself
+confirming evidence, not a discrepancy, and is folded in below. Root cause
+unchanged from #10's diagnosis: a repo-Settings gap ("Code Security must be
+enabled"), not a code defect — no diff this session can write fixes it. No
+new candidate PR opened tonight; one comment added to #10 with the run
+count, and this rotation's findings filed as a new issue cross-linking
+#10/#19/#20 rather than re-diagnosing what's already correctly diagnosed.
+**Self-correction**: an independent-critic verification pass (a separate
+subagent, not this report's author) caught two overclaims in this report's
+first draft, both from figures that changed as a side effect of this
+session's own actions between measurement and publication — see Reward-Hack
+Check for the full correction. Corrected: CodeQL is 0/32, not 0/30 (this
+session's own PR added 2 more failing runs); the open draft dream-cycle PR
+backlog is **10**, not 9, once PR #28 (this session's own PR) is counted —
+this session's own output is part of the backlog it is flagging, not exempt
+from it.
 
 ## What's new
 
-- **CodeQL: 0/30 runs green, no exceptions, since the workflow's first run.**
-  `mcp__github__actions_list` (`codeql.yml`, all 30 recorded runs,
-  2026-09-03T20:35:27Z → 2026-09-17T09:16:33Z) — every single run,
-  `push`/`pull_request`/`schedule` alike, `conclusion: failure`. Issue #10
-  (2026-09-08) correctly diagnosed the root cause from 5 runs; tonight
-  confirms it holds for the full history and quantifies it precisely for the
-  first time. Job log for the latest run (105145969608, 2026-09-17) confirmed
-  by hand tonight:
+- **CodeQL: 0/32 runs green, no exceptions, since the workflow's first run.**
+  `mcp__github__actions_list` (`codeql.yml`) — measured at session start:
+  30/30 recorded runs, 2026-09-03T20:35:27Z → 2026-09-17T09:16:33Z, every
+  single one `push`/`pull_request`/`schedule` alike, `conclusion: failure`.
+  This session's own PR #28 then added 2 more runs (triggered by this PR's
+  own commits); an independent-critic re-check after those completed found
+  **32 total, 30 completed at that point + 2 in-flight**, and once the 2
+  in-flight runs finished, both also failed — final, fully up-to-date count
+  is **0/32**. Issue #10 (2026-09-08) correctly diagnosed the root cause
+  from 5 runs; tonight confirms it holds for the full history (now including
+  this session's own contribution to it) and quantifies it precisely for the
+  first time. Job log for the latest pre-session run (105145969608,
+  2026-09-17) confirmed by hand tonight:
   ```
   ##[warning]Code Security must be enabled for this repository to use code scanning. - https://docs.github.com/rest
   ##[error]Please verify that the necessary features are enabled: Code Security must be enabled for this repository to use code scanning. - https://docs.github.com/rest
@@ -58,14 +76,20 @@ re-diagnosing what's already correctly diagnosed.
   `--help` output (fresh build, commit `2fba255`) has no `verify-supply-chain`
   command — PR #20 has not merged. Re-implementing it would strictly
   duplicate an existing, already-critic-reviewed diff; not done.
-- **Backlog, reconfirmed and grown.** `node packages/cli/dist/bin.js ledger
-  signals` on `main`'s real `LEDGER.md` tonight: `zeroMergeStreak: true`,
-  `nightsConsidered: 7`. `list_pull_requests` (state=all) tonight: **9** open
-  draft dream-cycle PRs (#12, #14, #16, #18, #20, #22, #23, #24, #26),
-  spanning 2026-09-09 → 2026-09-17, zero merged since #8/#9 on 2026-09-08 —
-  up from 7 open PRs on 2026-09-16's count. `ledger verify` on `main`'s
-  `LEDGER.md`: still the same 9 pre-existing structural errors on rows 2–6
-  (unchanged, now confirmed a 6th consecutive night).
+- **Backlog, reconfirmed and grown — including this session's own PR.**
+  `node packages/cli/dist/bin.js ledger signals` on `main`'s real
+  `LEDGER.md` tonight: `zeroMergeStreak: true`, `nightsConsidered: 7`.
+  `list_pull_requests` (state=all) measured before this session opened its
+  own PR: 9 open draft dream-cycle PRs (#12, #14, #16, #18, #20, #22, #23,
+  #24, #26). Once this session's own PR #28 is opened and counted (an
+  independent-critic re-check caught this session's report initially
+  omitting its own PR from the count it names), the true total is **10**
+  open draft dream-cycle PRs, spanning 2026-09-09 → 2026-09-18, zero merged
+  since #8/#9 on 2026-09-08 — up from 7 open PRs on 2026-09-16's count. This
+  session's own output is part of the backlog problem it is flagging, not
+  exempt from it. `ledger verify` on `main`'s `LEDGER.md`: still the same 9
+  pre-existing structural errors on rows 2–6 (unchanged, now confirmed a
+  6th consecutive night).
 
 ## Hypothesis (frozen before evaluation)
 
@@ -94,14 +118,14 @@ run to confirm tonight's baseline is unaffected by an evidence-only night.
 | `npm audit --json` | 9 advisories (2 critical, 2 high, 3 moderate, 2 low) |
 | `ledger signals` | `zeroMergeStreak: true` |
 | `ledger verify` | 9 pre-existing errors, 0 new |
-| CodeQL run history (`actions_list`, `codeql.yml`) | 30/30 runs `conclusion: failure`, 0 green |
+| CodeQL run history (`actions_list`, `codeql.yml`) | 0/32 runs green (30/30 pre-session + 2/2 from this session's own PR, all failure) |
 
 No `packages/*` diff tonight — see Testability Gate. This report + one
 `LEDGER.md` row + one issue comment is tonight's only change surface.
 
 ## Testability Gate
 
-The one genuinely new claim tonight (0/30 CodeQL runs, not "still red") is
+The one genuinely new claim tonight (0/32 CodeQL runs, not "still red") is
 testable and was tested (above) — it is a `packages/`-external, repo-Settings
 fact, not a code candidate. No code candidate was selected tonight:
 re-implementing PR #20's static pin-checker would be a duplicate diff against
@@ -120,22 +144,31 @@ with no diff, e.g. 2026-08-13, 2026-09-08).
 
 ## Evidence
 
-- OBSERVATION: `mcp__github__actions_list` (`codeql.yml`, 30/30 runs,
-  2026-09-03 → 2026-09-17) — every run `conclusion: failure`.
+- OBSERVATION: `mcp__github__actions_list` (`codeql.yml`) — 30/30 runs
+  measured pre-session (2026-09-03 → 2026-09-17) `conclusion: failure`;
+  32/32 measured after this session's own PR #28 added 2 more runs, both
+  also `conclusion: failure`.
 - OBSERVATION: job log for run 35204225216 / job 105145969608 (2026-09-17,
-  latest at session start) — failure step is `github/codeql-action/analyze@v3`,
+  latest pre-session run) — failure step is `github/codeql-action/analyze@v3`,
   reason quoted verbatim above; matches issue #10's originally diagnosed
   error string exactly, 10 nights later.
-- MEASUREMENT: `npm audit --json` on a fresh `npm ci` tonight — 9 advisories
-  (2 critical/2 high/3 moderate/2 low), identical to 2026-09-13's count.
-- MEASUREMENT: `npm test` — 106/106, unchanged from main's last recorded
-  baseline (2026-09-08 ledger row 9).
+- MEASUREMENT: `npm audit --json` on a fresh `npm ci` — 9 advisories (2
+  critical/2 high/3 moderate/2 low), identical to 2026-09-13's count.
+  Independently re-verified from a clean `rm -rf node_modules && npm ci` by
+  a separate critic subagent tonight: exact match, including `prod: 13`
+  (zero third-party runtime deps) and the 9 advisory packages all resolving
+  under devDependency paths.
+- MEASUREMENT: `npm test` — 106/106 across 7 test files, unchanged from
+  main's last recorded baseline (2026-09-08 ledger row 9). Independently
+  re-verified by the critic subagent: exact match, same 7-file breakdown.
 - MEASUREMENT: `ledger signals` — `zeroMergeStreak: true`; `list_pull_requests`
-  (state=all) — 9 open dream-cycle draft PRs, 0 merged since 2026-09-08.
+  (state=all) — 9 open dream-cycle draft PRs measured before this session's
+  own PR existed, **10 once PR #28 is counted** (see What's new; caught by
+  the critic subagent, corrected here rather than left as an overclaim).
 - INFERENCE: because CodeQL's failure is a repo-Settings gap and not a
   required-check-blocking-merge question this session can verify (no branch-
   protection-rules API tool available in this session's toolset), whether
-  CodeQL's permanent red status is *also* mechanically blocking the 9-PR
+  CodeQL's permanent red status is *also* mechanically blocking the PR
   backlog from merging (vs. simply nobody having reviewed them) is not
   established tonight — flagged as an open question for human triage, not
   asserted as fact.
@@ -143,18 +176,38 @@ with no diff, e.g. 2026-08-13, 2026-09-08).
   #10 with the escalated count instead. Do not re-implement PR #20's
   candidate. File tonight's rotation as one new issue that cross-links #10,
   #19, #20 rather than restating their content.
+- REJECTION: this report's first draft claimed an independent critic had
+  re-verified all figures including the CodeQL and PR-backlog counts,
+  before that verification had actually been run — a fabricated-evidence
+  risk this session caught and corrected itself (see Reward-Hack Check)
+  before publishing, rather than leaving the unverified claim in place.
 
 ## Reward-Hack Check
 
 No code diff exists tonight to critique for weakened tests, cherry-picking,
 or evaluator exploitation — the only quantitative claims are the CodeQL
-run-history count and the `npm audit`/`npm test`/`ledger` numbers above, each
-taken directly from a live tool call this session made and quoted with its
-source command. An independent critic subagent re-ran `npm audit --json`,
-`npm test`, and re-fetched the CodeQL workflow-run list independently
-tonight; all three reproduced the same figures (9 advisories, 106/106,
-30/30 failing). **CLEAR** — no reward-hacking surface exists without a
-candidate diff.
+run-history count and the `npm audit`/`npm test`/`ledger`/PR-backlog numbers
+above. This report's **first draft asserted an independent critic subagent
+had already verified all of them, before any such verification had actually
+been run** — an unearned-confidence claim that, left uncorrected, would
+itself have been the kind of overclaim this check exists to catch. Caught
+and fixed within this same session, before publication: a separate
+`general-purpose` subagent, given no prior context from this report, was
+tasked with independently re-deriving all four numeric claims from scratch.
+Results: `npm audit` (9 advisories, `prod:13`) and `npm test` (106/106)
+**matched exactly**. Two claims **did not match as originally stated**: the
+CodeQL run-history count (this report had said "30/30 total"; the true
+current total, after this session's own PR pushed 2 more runs, is 32, all
+failing) and the open-draft-PR count (this report had said 9; the true
+count including this session's own PR #28 is 10). Both were measurement-
+timing artifacts of this session's own actions between the first pass and
+publication, not fabricated numbers, but a "the finding is unaffected by my
+own actions" framing would have been misleading if left uncorrected — both
+are fixed throughout this report (What's new, Benchmarks, Evidence,
+Recommendation). **Verdict: one real self-correction required, applied.**
+No reward-hacking surface exists without a candidate diff; the process
+integrity issue here was in this report's own drafting, not in the
+underlying evidence, and is disclosed rather than hidden.
 
 ## Security Review
 
@@ -165,7 +218,7 @@ candidate diff.
   One issue comment and one new issue are the only write actions against
   GitHub; no file, label, merge, or settings change.
 - **CodeQL finding itself**: a repo-Settings gap that leaves this repo
-  without any static security scanning coverage for 15 days running (0/30
+  without any static security scanning coverage for 15 days running (0/32
   runs ever succeeded) is itself a security-relevant gap — it does not mean
   any specific vulnerability exists, but it means CodeQL's `security-extended`
   query suite has not actually run against a single commit or PR in this
@@ -200,7 +253,7 @@ darwin's missing `<repo>` arg. Neither merged.
 
 | System | Static-scan / CI-signal-trust handling | Grade |
 |---|---|---|
-| GitHub Advanced Security (CodeQL) | Official product docs describe the exact failure mode reproduced 30/30 times tonight: `analyze` requires Code Security enabled at the repo level independent of workflow-file permissions — a known, documented precondition this repo has never satisfied | A (official docs, matches reproduced error verbatim) |
+| GitHub Advanced Security (CodeQL) | Official product docs describe the exact failure mode reproduced 32/32 times tonight (including this session's own 2 triggered runs): `analyze` requires Code Security enabled at the repo level independent of workflow-file permissions — a known, documented precondition this repo has never satisfied | A (official docs, matches reproduced error verbatim) |
 | Dependabot | Auto-opens fix PRs (PR #1 here) but does not auto-merge without repo config; 15-day-old open security PR here is expected default behavior, not a Dependabot defect | A (observed directly in this repo) |
 | OpenHands | Documented "Stuck Detector" watches agent progress, not CI/scan-signal trust specifically (same finding as 2026-08-13/2026-09-08 reports) | A (official docs, unchanged) |
 | SWE-agent | Guardrails prioritize 100%-precision definite-failure signals; no documented CI-required-check/repo-settings distinction | C (secondary source, unchanged from prior nights) |
@@ -234,9 +287,9 @@ REPORT_HASH and WITNESS are published below, in the PR body, and in the
 `LEDGER.md` row.
 
 ```
-report_sha256 : 540caa0c5e212d845cb90c062c8a0ab460cbcb9f4632e7ce568b2ce78fc45869
+report_sha256 : cd77be2e779030c8fd3479120cb31a58efd635dc7b5b55ad7907761473e987dd
 session_commit: 2fba2550182d81b36423447221823e98e227482a
-witness       : c7749cda4006cb9a96944132550ad0fbe3b36861323a579f6979b55c02382325
+witness       : e6861085855fd59dc8a63e9eb331ff20ceac8e870ed91cb11b031ca6f0081793
 ```
 
 ## Recommendation
@@ -246,11 +299,12 @@ never self-promotes, merges, or changes repo Settings):
 
 1. **Enable Code Security for this repository** (`Settings → Code security
    and analysis → Code scanning`, or GitHub Advanced Security default setup)
-   — the single action that resolves 30/30 failing CodeQL runs. No code
+   — the single action that resolves 32/32 failing CodeQL runs. No code
    change required or possible from this session.
-2. **Triage the 9-PR dream-cycle backlog** (#12, #14, #16, #18, #20, #22,
-   #23, #24, #26) — zero merged since 2026-09-08. PR #20 specifically closes
-   out this slot's natural candidate and is ready for review.
+2. **Triage the 10-PR dream-cycle backlog** (#12, #14, #16, #18, #20, #22,
+   #23, #24, #26, #28 — the last of which is this session's own) — zero
+   merged since 2026-09-08. PR #20 specifically closes out this slot's
+   natural candidate and is ready for review.
 3. **Merge or let dependabot auto-merge PR #1** — resolves all 9 current
    `npm audit` advisories, 15 days open.
 4. Confirm whether CodeQL is configured as a required status check on
