@@ -94,6 +94,45 @@ export function verify(
   return { ok: true, expected };
 }
 
+const HEX_PREFIX = /^[0-9a-f]{6,64}$/;
+
+/**
+ * Verify a claimed witness *prefix* against the raw report + commit — the form
+ * `LEDGER.md`'s Witness column actually stores (e.g. `"13472532"`, 8 hex
+ * chars), not the full 64-char witness. Reproduced 2026-09-19 (developer-
+ * experience night, SCAN=cli,tui): recomputing the witness for 6 of the last
+ * 10 nights' *committed* report files (via this same {@link stamp}) does not
+ * reproduce the prefix published in that night's own PR body / LEDGER.md row
+ * — the report was edited after being stamped, so the ledger's "durable,
+ * reproducible" witness silently stopped verifying against the actual
+ * committed bytes. `verify()` alone couldn't have caught this: the ledger
+ * never stores a full 64-char witness to check it against.
+ */
+export function verifyPrefix(
+  report: string | Uint8Array,
+  sessionCommit: CommitSha,
+  claimedPrefix: string,
+): { ok: boolean; expected: Witness; reason?: string } {
+  let expected: Witness;
+  try {
+    expected = stamp(report, sessionCommit);
+  } catch (e) {
+    return {
+      ok: false,
+      expected: { reportHash: hashReport(report), sessionCommit, witness: '' },
+      reason: (e as Error).message,
+    };
+  }
+  const claimed = claimedPrefix.trim().toLowerCase();
+  if (!HEX_PREFIX.test(claimed)) {
+    return { ok: false, expected, reason: 'claimed witness prefix must be 6-64 hex chars' };
+  }
+  if (!expected.witness.startsWith(claimed)) {
+    return { ok: false, expected, reason: 'witness prefix mismatch — report or commit differs from what was stamped' };
+  }
+  return { ok: true, expected };
+}
+
 /** Normalize/validate a commit sha (lowercased, hex-only). */
 export function normalizeCommit(sessionCommit: CommitSha): CommitSha {
   const c = sessionCommit.trim().toLowerCase();

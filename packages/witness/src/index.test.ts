@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
-import { stamp, verify, hashReport, witnessFromHash, normalizeCommit, verifySteps } from './index.js';
+import { stamp, verify, verifyPrefix, hashReport, witnessFromHash, normalizeCommit, verifySteps } from './index.js';
 
 const COMMIT = '68402755f017e0df5f493c6ee608218420540d17';
 
@@ -80,6 +80,38 @@ describe('witness verify', () => {
     const r = verify('report', 'nothex', 'a'.repeat(64));
     expect(r.ok).toBe(false);
     expect(r.reason).toMatch(/hex/);
+  });
+});
+
+describe('witness verifyPrefix', () => {
+  it('accepts the 8-char prefix LEDGER.md actually stores', () => {
+    const w = stamp('genuine report bytes', COMMIT);
+    expect(verifyPrefix('genuine report bytes', COMMIT, w.witness.slice(0, 8)).ok).toBe(true);
+  });
+
+  it('accepts the full 64-char witness too', () => {
+    const w = stamp('r', COMMIT);
+    expect(verifyPrefix('r', COMMIT, w.witness).ok).toBe(true);
+  });
+
+  it('is case-insensitive and trims', () => {
+    const w = stamp('r', COMMIT);
+    expect(verifyPrefix('r', COMMIT, `  ${w.witness.slice(0, 8).toUpperCase()}  `).ok).toBe(true);
+  });
+
+  it('rejects a wrong prefix (report edited after stamping)', () => {
+    const w = stamp('report', COMMIT);
+    const r = verifyPrefix('reporu', COMMIT, w.witness.slice(0, 8));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/mismatch/);
+  });
+
+  it('rejects a prefix shorter than 6 hex chars', () => {
+    expect(verifyPrefix('report', COMMIT, 'ab').ok).toBe(false);
+  });
+
+  it('rejects non-hex input', () => {
+    expect(verifyPrefix('report', COMMIT, 'not-hex!').ok).toBe(false);
   });
 });
 

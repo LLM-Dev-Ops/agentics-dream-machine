@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { run, parseArgs, VERSION, type IO } from './index.js';
+import { run, parseArgs, VERSION, reportPathsFor, type IO } from './index.js';
 import { renderDashboard } from './tui.js';
 import { appendRow, emptyLedger, type LedgerRow } from '@dream-machine/ledger';
 import { stamp } from '@dream-machine/witness';
@@ -141,6 +141,73 @@ describe('ledger', () => {
     );
     expect(r.code).toBe(0);
     expect(io.files['L.md']).toContain('| perf |');
+  });
+
+  describe('check-witnesses', () => {
+    const commit = '2fba2550182d81b36423447221823e98e227482a';
+    const report = '# a genuine, unedited report\n';
+    const w = stamp(report, commit);
+
+    it('requires --commit', async () => {
+      const r = await run(['ledger', 'check-witnesses', '--path', 'L.md'], mockIO({ 'L.md': ledgerMd }));
+      expect(r.code).toBe(1);
+      expect(r.err).toContain('--commit');
+    });
+
+    it('passes a row whose committed report still reproduces the ledger witness prefix', async () => {
+      const row = sampleRow({ witness: w.witness.slice(0, 8) });
+      const md = appendRow(emptyLedger(), row);
+      const io = mockIO({ 'L.md': md, 'docs/dream-cycle/2026-08-13-security-adversarial-report.md': report });
+      const r = await run(['ledger', 'check-witnesses', '--path', 'L.md', '--commit', commit], io);
+      expect(r.code).toBe(0);
+      expect(r.out).toContain('PASS');
+    });
+
+    it('flags a row whose report was edited after being stamped', async () => {
+      const row = sampleRow({ witness: w.witness.slice(0, 8) });
+      const md = appendRow(emptyLedger(), row);
+      const io = mockIO({
+        'L.md': md,
+        'docs/dream-cycle/2026-08-13-security-adversarial-report.md': report + '\nedited after stamping\n',
+      });
+      const r = await run(['ledger', 'check-witnesses', '--path', 'L.md', '--commit', commit], io);
+      expect(r.code).toBe(1);
+      expect(r.out).toContain('FAIL');
+    });
+
+    it('reports MISSING when no report file exists at either convention, without failing the run', async () => {
+      const row = sampleRow({ witness: w.witness.slice(0, 8) });
+      const md = appendRow(emptyLedger(), row);
+      const r = await run(['ledger', 'check-witnesses', '--path', 'L.md', '--commit', commit], mockIO({ 'L.md': md }));
+      expect(r.code).toBe(0);
+      expect(r.out).toContain('MISSING');
+    });
+
+    it('falls back to the gists/ naming convention', async () => {
+      const row = sampleRow({ witness: w.witness.slice(0, 8) });
+      const md = appendRow(emptyLedger(), row);
+      const io = mockIO({ 'L.md': md, 'docs/dream-cycle/gists/2026-08-13-security-adversarial.md': report });
+      const r = await run(['ledger', 'check-witnesses', '--path', 'L.md', '--commit', commit], io);
+      expect(r.code).toBe(0);
+      expect(r.out).toContain('PASS');
+    });
+
+    it('skips a row with no recorded witness', async () => {
+      const row = sampleRow({ witness: '' });
+      const md = appendRow(emptyLedger(), row);
+      const r = await run(['ledger', 'check-witnesses', '--path', 'L.md', '--commit', commit], mockIO({ 'L.md': md }));
+      expect(r.code).toBe(0);
+      expect(r.out).toContain('SKIP');
+    });
+  });
+});
+
+describe('reportPathsFor', () => {
+  it('tries the plain report convention then the gists/ convention', () => {
+    expect(reportPathsFor({ date: '2026-09-19', deep: 'developer-experience' }, 'docs/dream-cycle')).toEqual([
+      'docs/dream-cycle/2026-09-19-developer-experience-report.md',
+      'docs/dream-cycle/gists/2026-09-19-developer-experience.md',
+    ]);
   });
 });
 
