@@ -15,7 +15,7 @@ import {
   verdictStats,
   type LedgerRow,
 } from '@dream-machine/ledger';
-import { stamp, verify, verifySteps } from '@dream-machine/witness';
+import { stamp, verify, verifyPrefix, verifySteps } from '@dream-machine/witness';
 import { serializeRoutine, scheduleInstructions } from '@dream-machine/schedule';
 import { renderDashboard } from './tui.js';
 import { classifyEntrypointResult, classifyConfiguredEntrypoints, type ExecResult } from './entrypoint.js';
@@ -56,6 +56,15 @@ function makeSink() {
   };
 }
 
+/**
+ * The two report-file naming conventions this repo's own nightly runs have
+ * actually used for a ledger row (plain report, and the gists/ subdirectory
+ * variant) — tried in order by `ledger check-witnesses`.
+ */
+export function reportPathsFor(row: { date: string; deep: string }, dir: string): string[] {
+  return [`${dir}/${row.date}-${row.deep}-report.md`, `${dir}/gists/${row.date}-${row.deep}.md`];
+}
+
 /** Minimal flag parser: --key val, --key=val, --bool, positionals. */
 export function parseArgs(argv: string[]): { _: string[]; flags: Record<string, string | boolean> } {
   const _: string[] = [];
@@ -94,6 +103,7 @@ Commands:
   ledger signals  [--path LEDGER.md]                   Print STEP 1.1 learning signals
   ledger stats    [--path LEDGER.md]                   Verdict distribution
   ledger append   --path L --date .. --deep .. ...     Append one row
+  ledger check-witnesses --commit SHA [--path L] [--dir D]  Re-verify each row's witness against its committed report
   witness stamp   <report-file> <commit>               Compute the witness triple
   witness verify  <report-file> <commit> <witness>     Verify a claimed witness
   verify-entrypoint <label> --cmd "<command>"           Classify an evaluator entrypoint's liveness
@@ -224,7 +234,46 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
           sink.log(`appended row to ${path} (verdict=${row.verdict})`);
           return { code: 0, out: sink.out, err: sink.err };
         }
-        sink.error('ledger: expected sub-command verify|signals|stats|append');
+        if (sub === 'check-witnesses') {
+          const commit = flags.commit as string | undefined;
+          if (!commit) {
+            sink.error('usage: dream-machine ledger check-witnesses --commit <sha> [--path L] [--dir docs/dream-cycle]');
+            return { code: 1, out: sink.out, err: sink.err };
+          }
+          const dir = (flags.dir as string) || 'docs/dream-cycle';
+          const { rows } = parseLedger(md);
+          let anyFail = false;
+          for (const row of rows) {
+            if (!row.witness) {
+              sink.log(`${row.date}: SKIP (no witness recorded)`);
+              continue;
+            }
+            let found: { path: string; content: string } | undefined;
+            for (const p of reportPathsFor(row, dir)) {
+              try {
+                found = { path: p, content: await io.readFile(p) };
+                break;
+              } catch {
+                // try the next naming convention
+              }
+            }
+            if (!found) {
+              sink.log(`${row.date}: MISSING (no report file at ${reportPathsFor(row, dir).join(' or ')})`);
+              continue;
+            }
+            const r = verifyPrefix(found.content, commit, row.witness);
+            if (r.ok) {
+              sink.log(`${row.date}: PASS (${found.path} verifies against ${row.witness})`);
+            } else {
+              anyFail = true;
+              sink.log(
+                `${row.date}: FAIL (${found.path} does not reproduce witness ${row.witness} against commit ${commit} — ${r.reason}; recomputed prefix ${r.expected.witness.slice(0, 8)})`,
+              );
+            }
+          }
+          return { code: anyFail ? 1 : 0, out: sink.out, err: sink.err };
+        }
+        sink.error('ledger: expected sub-command verify|signals|stats|append|check-witnesses');
         return { code: 1, out: sink.out, err: sink.err };
       }
 
