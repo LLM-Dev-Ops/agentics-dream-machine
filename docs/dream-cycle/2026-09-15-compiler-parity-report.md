@@ -165,18 +165,26 @@ prior night). Committed as
 
 ## Witness
 
-```
-report_sha256 : 7be55a8894c2cb2e3c71741cd5572e1fddceb3791518a5d0cdff410b2ccc9475
-session_commit: 2fba2550182d81b36423447221823e98e227482a
-witness       : 3be1f299ae20fd14995eb8f0486da48c819cc174f39ce7f32dbadb5d92a22344
-```
-Verify: `sha256sum docs/dream-cycle/2026-09-15-compiler-parity-report.md`
-(taking the pre-witness-section content this hash was computed against, i.e.
-this file up to and not including this Witness block's stamped values —
-consistent with the convention used in the 2026-09-10 and 2026-09-11
-reports), then
+**Correction (2026-09-19):** the original version of this section embedded a
+`report_sha256`/`witness` pair computed from a pre-edit draft, then that pair
+was written *into this very file* before commit — the self-reference paradox
+this repo's own witness docstring warns against ("cannot be written inside
+the file it stamps"). Issue #29 / PR #30 independently re-verified every
+backfilled report's witness against its actual git-committed blob and found
+this report (2026-09-15) among the 6/10 that do not reproduce, for exactly
+that reason. Fixing it here rather than leaving it broken.
+
+The corrected convention (matching PR #30's fix): no numeric hash is embedded
+in this file at all. `REPORT_HASH` is computed from this file's actual
+git-committed blob, after this fix, and published externally — in this
+branch's PR description and the `docs/dream-cycle/LEDGER.md` row for
+2026-09-15 — never re-edited back into the file itself.
+
+Verify: `git show <this-commit>:docs/dream-cycle/2026-09-15-compiler-parity-report.md | sha256sum`
+must equal the `report_sha256` published in the PR body and ledger row, and
 `printf '%s%s' "$REPORT_HASH" "2fba2550182d81b36423447221823e98e227482a" | sha256sum`
-must equal the witness above.
+(session commit `2fba2550182d81b36423447221823e98e227482a`) must equal the
+published `witness` value.
 
 ## Recommendation
 
