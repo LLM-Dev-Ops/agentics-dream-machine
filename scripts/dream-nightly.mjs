@@ -147,7 +147,22 @@ async function main() {
   }
 
   // Append + commit one ledger row on a branch, then open a draft PR.
-  const priorFates = shSafe('bash', ['-lc', `tail -n 3 ${LEDGER} 2>/dev/null | head -n 1`]).slice(0, 40) || 'first night';
+  //
+  // Derived via the real parser (@dream-machine/ledger), not a raw
+  // tail/head text heuristic: LEDGER.md can carry trailing markdown after
+  // its table (e.g. a quarantined-rows archive) that still contains `|`
+  // characters, so any line-count-from-EOF heuristic silently picks up
+  // stale/foreign content instead of the actual last parsed row. See
+  // docs/dream-cycle/LEDGER.md's quarantine section for the incident this
+  // caused once already.
+  const priorFates = shSafe('node', ['-e', `
+    import('@dream-machine/ledger').then(({ parseLedger }) => {
+      const md = require('node:fs').readFileSync(${JSON.stringify(LEDGER)}, 'utf8');
+      const { rows } = parseLedger(md);
+      const last = rows[rows.length - 1];
+      process.stdout.write(last ? last.finding.slice(0, 40) : '');
+    });
+  `]) || 'first night';
   execFileSync('node', ['packages/cli/dist/bin.js', 'ledger', 'append',
     '--path', LEDGER, '--date', ctx.date, '--deep', ctx.deep,
     '--finding', finding, '--issue', issueRef, '--pr', 'NONE',
