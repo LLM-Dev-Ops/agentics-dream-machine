@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import {
   emptyLedger,
   parseLedger,
@@ -11,6 +13,10 @@ import {
   LEDGER_COLUMNS,
   type LedgerRow,
 } from './index.js';
+
+const REAL_LEDGER_PATH = fileURLToPath(
+  new URL('../../../docs/dream-cycle/LEDGER.md', import.meta.url),
+);
 
 function row(over: Partial<LedgerRow> = {}): LedgerRow {
   return {
@@ -106,6 +112,24 @@ describe('verifyLedger', () => {
     const r = verifyLedger('just some text, no table');
     expect(r.ok).toBe(false);
     expect(r.errors.join()).toMatch(/header/);
+  });
+
+  it('bounds parsing to the first table: a blank line ends the table, so trailing markdown (an archive/quarantine section, prose with a literal "|") is never swept in as rows', () => {
+    const l =
+      appendRow(emptyLedger(), row()) +
+      '\n## Quarantined rows (foreign-repo contamination)\n\n' +
+      '| 2099-01-01 | not-a-real-night | injected via drive-by PR | #999 | #999 | yes | ACCEPT | n/a | deadbeef | should never be parsed |\n';
+    const { rows, warnings } = parseLedger(l);
+    expect(rows).toHaveLength(1);
+    expect(warnings).toEqual([]);
+    expect(verifyLedger(l).rowCount).toBe(1);
+  });
+
+  it('the real repository ledger (docs/dream-cycle/LEDGER.md) verifies clean — regression canary against ledger contamination', () => {
+    const md = readFileSync(REAL_LEDGER_PATH, 'utf8');
+    const r = verifyLedger(md);
+    expect(r.errors).toEqual([]);
+    expect(r.ok).toBe(true);
   });
 });
 

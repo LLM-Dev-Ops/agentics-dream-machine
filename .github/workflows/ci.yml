@@ -33,6 +33,8 @@ jobs:
         run: npm run lint
       - name: Test (with coverage)
         run: npx vitest run --coverage
+      - name: Ledger integrity (dream-cycle schema gate)
+        run: node packages/cli/dist/bin.js ledger verify --path docs/dream-cycle/LEDGER.md
       - name: CLI smoke test (proves the published bin works)
         run: |
           node packages/cli/dist/bin.js version
