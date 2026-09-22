@@ -97,7 +97,9 @@ Commands:
   witness stamp   <report-file> <commit>               Compute the witness triple
   witness verify  <report-file> <commit> <witness>     Verify a claimed witness
   verify-entrypoint <label> --cmd "<command>"           Classify an evaluator entrypoint's liveness
-  verify-entrypoints [config]                           Classify every evaluatorEntrypoints in a dream.config
+  verify-entrypoints [config] [--idempotency-check]     Classify every evaluatorEntrypoints in a dream.config
+                                                         (--idempotency-check re-runs each cmd once more and
+                                                         flags one whose verdict changes between runs)
   tui             [--path LEDGER.md] [--no-color]      Render the dashboard
   version | --version                                  Print version
   help    | --help                                     This help
@@ -310,11 +312,19 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
           sink.log(`verify-entrypoints: ${cfgPath} declares no evaluatorEntrypoints`);
           return { code: 0, out: sink.out, err: sink.err };
         }
-        const results = await classifyConfiguredEntrypoints(Object.fromEntries(entries), io.exec);
+        const idempotencyCheck = Boolean(flags['idempotency-check']);
+        const results = await classifyConfiguredEntrypoints(Object.fromEntries(entries), io.exec, {
+          idempotencyCheck,
+        });
         let worst = 0;
         for (const r of results) {
           sink.log(`${r.label}: ${r.verdict} (exit ${r.code}) — ${r.reason}`);
-          worst = Math.max(worst, r.verdict === 'live' ? 0 : r.verdict === 'blocked' ? 1 : 2);
+          if (r.idempotency && !r.idempotency.idempotent) {
+            sink.log(`${r.label}: NOT IDEMPOTENT — ${r.idempotency.reason}`);
+          }
+          const verdictScore = r.verdict === 'live' ? 0 : r.verdict === 'blocked' ? 1 : 2;
+          const idempotencyScore = r.idempotency && !r.idempotency.idempotent ? 1 : 0;
+          worst = Math.max(worst, verdictScore, idempotencyScore);
         }
         return { code: worst, out: sink.out, err: sink.err };
       }

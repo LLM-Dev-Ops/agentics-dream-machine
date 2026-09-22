@@ -5,3 +5,7 @@ coverage/
 .DS_Store
 .env
 .dream/
+# Reproduced 2026-09-22: `npx @metaharness/darwin evolve --sandbox real` — the
+# exact darwin evaluatorEntrypoints command in dream.config.json — writes its
+# variant/run state to a literal `./--sandbox/` directory in the invoking cwd.
+--sandbox/
