@@ -276,6 +276,32 @@ describe('verify-entrypoints', () => {
     expect(r.code).toBe(1);
     expect(r.err).toContain('no exec()');
   });
+
+  it('--idempotency-check re-runs each command and flags a darwin-style live-then-blocked flip', async () => {
+    let darwinCalls = 0;
+    const io = mockIOWithExec(async (cmd) => {
+      if (cmd === 'npm test') return { code: 0, stdout: '98 passed', stderr: '' };
+      darwinCalls += 1;
+      if (darwinCalls === 1) return { code: 0, stdout: 'g1_v0 scored', stderr: '' };
+      return { code: 1, stdout: '', stderr: 'Error: darwin: autonomous or generated child id already exists: g1_v0' };
+    }, { 'dream.config.json': cfgJson });
+    const r = await run(['verify-entrypoints', '--idempotency-check'], io);
+    expect(r.out).toContain('darwin: live');
+    expect(r.out).toContain('darwin: NOT IDEMPOTENT');
+    expect(r.code).toBe(1); // idempotency failure scores like `blocked`
+  });
+
+  it('without --idempotency-check, runs each command once and never reports NOT IDEMPOTENT', async () => {
+    let darwinCalls = 0;
+    const io = mockIOWithExec(async (cmd) => {
+      if (cmd === 'npm test') return { code: 0, stdout: '98 passed', stderr: '' };
+      darwinCalls += 1;
+      return { code: 0, stdout: 'g1_v0 scored', stderr: '' };
+    }, { 'dream.config.json': cfgJson });
+    const r = await run(['verify-entrypoints'], io);
+    expect(darwinCalls).toBe(1);
+    expect(r.out).not.toContain('NOT IDEMPOTENT');
+  });
 });
 
 describe('tui', () => {

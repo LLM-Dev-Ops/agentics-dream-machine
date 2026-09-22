@@ -9,6 +9,7 @@ Alternatives Considered → Test Contract → References.
 |-----|-------|--------|
 | [ADR-0001](./ADR-0001-dream-machine-engine.md) | The Dream Machine engine — a config-driven, evidence-gated nightly evolution loop composed from the ruvnet stack | Accepted (v0.1.0 shipped) |
 | [ADR-0002](./ADR-0002-dream-cycle-security-adversarial-entrypoint-liveness.md) | Evaluator entrypoints must be classified live/blocked/suspicious-silent before an EVALUATED verdict is recorded | Proposed |
+| [ADR-0004](./ADR-0004-dream-cycle-evaluation-adapters-entrypoint-idempotency.md) | Evaluator entrypoints must also be checked for idempotency — a single "live" verdict is not sufficient trust (numbering note: skips ADR-0003, already claimed by still-open PR #18) | Proposed |
 
 ## How to amend
 
