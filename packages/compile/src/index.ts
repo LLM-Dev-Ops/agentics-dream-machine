@@ -15,8 +15,17 @@ import {
   adrDir,
   adrPad,
 } from './config.js';
+import { assessMergePolicyReachability } from './mergePolicy.js';
 
 export * from './config.js';
+export * from './mergePolicy.js';
+
+/**
+ * STEP 20-25 (below) opens every dream-cycle PR as a draft unconditionally
+ * ("even a significant result stays draft"). Single source of truth so
+ * {@link step20to25PublishFlow} and its tests can't drift from that text.
+ */
+const ALWAYS_OPENS_DRAFT_PR = true;
 
 const LEDGER_SCHEMA = '| Date | Deep | Finding | Issue | PR | Evaluated? | Verdict | Effect | Witness | Prior-night fates |';
 
@@ -329,16 +338,23 @@ Follow the repo's own ADR shape; Status starts \`Proposed\`; add the INDEX row.`
 }
 
 function step20to25PublishFlow(branchPrefix: string, ledgerPath: string, autoMerge: boolean): string {
-  const mergePolicy = autoMerge
-    ? `**Merge policy (guarded auto-merge ENABLED for this target).** Human review
+  const reachability = assessMergePolicyReachability({ autoMerge, alwaysOpensDraft: ALWAYS_OPENS_DRAFT_PR });
+  const mergePolicy = !autoMerge
+    ? `**Merge policy.** Human review required. The session never self-merges and
+never autonomously promotes candidate state.`
+    : reachability.reachable
+      ? `**Merge policy (guarded auto-merge ENABLED for this target).** Human review
 is still the default. Auto-merge may occur ONLY for a PR that (a) carries the
 explicit low-risk label configured for this repo, (b) is green on every required
 check, and (c) touched no evaluation/gate/safety infrastructure. Any candidate
 that changed a benchmark, gate, threshold, or security boundary is human-review-
 only, full stop. The session itself still never runs the merge — a separate,
 auditable CI job does, under those conditions.`
-    : `**Merge policy.** Human review required. The session never self-merges and
-never autonomously promotes candidate state.`;
+      : `**Merge policy (guarded auto-merge CONFIGURED, currently UNREACHABLE).**
+\`autoMerge: true\` is set, but ${reachability.reason} Effective default is
+human review: no dream-cycle PR can be auto-merged until a human marks it
+ready for review. The session itself still never runs the merge and never
+marks a PR ready for review on its own.`;
   return `# STEP 20–25: BRANCH → VALIDATE → COMMIT → PUSH → DRAFT PR → LEDGER
 
 Branch \`${branchPrefix}<DATE>-<surface>\` (deterministic suffix if it exists). Run
