@@ -297,4 +297,23 @@ describe('tui', () => {
     const frame = renderDashboard(md, { noColor: true });
     expect(frame).toContain('zero merges');
   });
+  it('noColor strips every VERDICT-cell escape too, not just the borders', () => {
+    let md = emptyLedger();
+    for (const verdict of ['ACCEPT', 'REJECT', 'INCONCLUSIVE', 'ACCEPT / REJECT']) {
+      md = appendRow(md, sampleRow({ verdict }));
+    }
+    const frame = renderDashboard(md, { noColor: true });
+    expect(frame).not.toMatch(/\x1b\[[0-9;]*m/);
+  });
+  it('the default colored path still emits ANSI for every verdict (guards against a hollow fix)', () => {
+    let md = emptyLedger();
+    for (const verdict of ['ACCEPT', 'REJECT', 'INCONCLUSIVE', 'ACCEPT / REJECT']) {
+      md = appendRow(md, sampleRow({ verdict }));
+    }
+    const frame = renderDashboard(md);
+    expect(frame).toMatch(/\x1b\[32m/); // ACCEPT -> green
+    expect(frame).toMatch(/\x1b\[31m/); // REJECT -> red
+    expect(frame).toMatch(/\x1b\[33m/); // INCONCLUSIVE -> yellow
+    expect(frame).toMatch(/\x1b\[38;5;245m/); // fallback -> gray
+  });
 });
