@@ -129,9 +129,34 @@ describe('ledger', () => {
     expect(JSON.parse(r.out).ACCEPT).toBe(1);
     expect(JSON.parse(r.out).REJECT).toBe(1);
   });
-  it('signals', async () => {
+  it('signals: reports mergeStatusSource=unknown (not a false "zero merges") when there is no way to check GitHub', async () => {
     const r = await run(['ledger', 'signals', '--path', 'L.md'], mockIO({ 'L.md': ledgerMd }));
-    expect(JSON.parse(r.out)).toHaveProperty('zeroMergeStreak');
+    const out = JSON.parse(r.out);
+    expect(out).toHaveProperty('zeroMergeStreak');
+    expect(out.mergeStatusSource).toBe('unknown');
+  });
+  it('signals: clears zeroMergeStreak using real GitHub merge state when a token + exec are available', async () => {
+    const io = mockIO({ 'L.md': ledgerMd, 'dream.config.json': JSON.stringify({ repo: 'o/r' }) });
+    io.env.GITHUB_TOKEN = 'tok';
+    io.exec = async (cmd) => {
+      const n = cmd.match(/\/pulls\/(\d+)"/)?.[1];
+      return { code: 0, stdout: `${JSON.stringify({ merged: n === '181' })}\n200`, stderr: '' };
+    };
+    const r = await run(['ledger', 'signals', '--path', 'L.md'], io);
+    const out = JSON.parse(r.out);
+    expect(out.mergeStatusSource).toBe('github-api');
+    expect(out.zeroMergeStreak).toBe(false);
+  });
+  it('signals: --repo flag overrides dream.config.json', async () => {
+    const io = mockIO({ 'L.md': ledgerMd });
+    io.env.GITHUB_TOKEN = 'tok';
+    let queriedRepo = '';
+    io.exec = async (cmd) => {
+      queriedRepo = cmd.match(/repos\/([^"]+)\/pulls/)?.[1] ?? '';
+      return { code: 0, stdout: '{"message":"Not Found"}\n404', stderr: '' };
+    };
+    await run(['ledger', 'signals', '--path', 'L.md', '--repo', 'flag/repo'], io);
+    expect(queriedRepo).toBe('flag/repo');
   });
   it('append writes a row (bootstraps ledger if missing)', async () => {
     const io = mockIO();

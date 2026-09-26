@@ -202,7 +202,10 @@ export interface SignalOptions {
   mergedPrNumbers?: Set<string>;
 }
 
-function prNumber(pr: string): string | null {
+/** Extract the bare numeric id from a "PR" cell (e.g. "#123" -> "123"). Exported so
+ * callers (e.g. the CLI, when resolving real merge state from GitHub) can build the
+ * same PR-number set the signal computation itself uses, instead of re-deriving it. */
+export function prNumber(pr: string): string | null {
   const m = pr.match(/#?(\d+)/);
   return m ? m[1] : null;
 }

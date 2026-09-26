@@ -13,12 +13,14 @@ import {
   emptyLedger,
   learningSignals,
   verdictStats,
+  prNumber,
   type LedgerRow,
 } from '@dream-machine/ledger';
 import { stamp, verify, verifySteps } from '@dream-machine/witness';
 import { serializeRoutine, scheduleInstructions } from '@dream-machine/schedule';
 import { renderDashboard } from './tui.js';
 import { classifyEntrypointResult, classifyConfiguredEntrypoints, type ExecResult } from './entrypoint.js';
+import { fetchMergedPrNumbers } from './merged-prs.js';
 
 export const VERSION = '0.1.1';
 
@@ -91,7 +93,10 @@ Commands:
   compile [config] [--out FILE]                        Compile config → routine prompt
   schedule [config] [--out FILE] [--env ID]            Emit the /schedule routine body
   ledger verify   [--path LEDGER.md]                   Structurally verify a ledger
-  ledger signals  [--path LEDGER.md]                   Print STEP 1.1 learning signals
+  ledger signals  [--path LEDGER.md] [--repo owner/name] Print STEP 1.1 learning signals
+                                                         (zeroMergeStreak checks real GitHub
+                                                         merge state when a token is set;
+                                                         falls back to mergeStatusSource=unknown)
   ledger stats    [--path LEDGER.md]                   Verdict distribution
   ledger append   --path L --date .. --deep .. ...     Append one row
   witness stamp   <report-file> <commit>               Compute the witness triple
@@ -198,7 +203,20 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
         }
         if (sub === 'signals') {
           const { rows } = parseLedger(md);
-          sink.log(JSON.stringify(learningSignals(rows), null, 2));
+          const token = io.env.GITHUB_TOKEN || io.env.GH_TOKEN;
+          let repo = flags.repo as string | undefined;
+          if (!repo) {
+            try {
+              repo = (JSON.parse(await io.readFile('dream.config.json')) as { repo?: string }).repo;
+            } catch {
+              // No config in cwd (or unreadable) — signals still work, merge status is just unknown.
+            }
+          }
+          const prNumbers = rows.map((r) => prNumber(r.pr)).filter((n): n is string => !!n);
+          const merged =
+            io.exec && token && repo ? await fetchMergedPrNumbers(repo, prNumbers, { exec: io.exec }) : null;
+          const signals = learningSignals(rows, merged ? { mergedPrNumbers: merged } : {});
+          sink.log(JSON.stringify({ ...signals, mergeStatusSource: merged ? 'github-api' : 'unknown' }, null, 2));
           return { code: 0, out: sink.out, err: sink.err };
         }
         if (sub === 'stats') {
