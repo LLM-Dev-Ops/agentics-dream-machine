@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyEntrypointResult, classifyConfiguredEntrypoints } from './entrypoint.js';
+import { classifyEntrypointResult, classifyConfiguredEntrypoints, entrypointExitCode } from './entrypoint.js';
 
 describe('classifyEntrypointResult', () => {
   it('flags a nonzero exit as blocked (reproduces npx @metaharness/flywheel: no bin field)', () => {
@@ -35,6 +35,18 @@ describe('classifyEntrypointResult', () => {
   it('treats exit 0 + stderr-only output as live (bench entrypoint may log to stderr)', () => {
     const r = classifyEntrypointResult({ code: 0, stdout: '', stderr: 'warning: slow test detected' });
     expect(r.verdict).toBe('live');
+  });
+});
+
+describe('entrypointExitCode', () => {
+  it('maps live -> 0, blocked -> 1, suspicious-silent -> 2 (ADR-0002 worst-verdict ordering)', () => {
+    expect(entrypointExitCode('live')).toBe(0);
+    expect(entrypointExitCode('blocked')).toBe(1);
+    expect(entrypointExitCode('suspicious-silent')).toBe(2);
+  });
+
+  it('is pure: repeated calls with the same verdict return the same value', () => {
+    expect(entrypointExitCode('blocked')).toBe(entrypointExitCode('blocked'));
   });
 });
 
