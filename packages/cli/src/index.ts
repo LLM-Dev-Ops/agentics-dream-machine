@@ -18,7 +18,12 @@ import {
 import { stamp, verify, verifySteps } from '@dream-machine/witness';
 import { serializeRoutine, scheduleInstructions } from '@dream-machine/schedule';
 import { renderDashboard } from './tui.js';
-import { classifyEntrypointResult, classifyConfiguredEntrypoints, type ExecResult } from './entrypoint.js';
+import {
+  classifyEntrypointResult,
+  classifyConfiguredEntrypoints,
+  entrypointExitCode,
+  type ExecResult,
+} from './entrypoint.js';
 
 export const VERSION = '0.1.1';
 
@@ -293,8 +298,7 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
         const result = await io.exec(cmd);
         const check = classifyEntrypointResult(result);
         sink.log(`${label}: ${check.verdict} (exit ${check.code}) — ${check.reason}`);
-        const code = check.verdict === 'live' ? 0 : check.verdict === 'blocked' ? 1 : 2;
-        return { code, out: sink.out, err: sink.err };
+        return { code: entrypointExitCode(check.verdict), out: sink.out, err: sink.err };
       }
 
       case 'verify-entrypoints': {
@@ -314,7 +318,7 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
         let worst = 0;
         for (const r of results) {
           sink.log(`${r.label}: ${r.verdict} (exit ${r.code}) — ${r.reason}`);
-          worst = Math.max(worst, r.verdict === 'live' ? 0 : r.verdict === 'blocked' ? 1 : 2);
+          worst = Math.max(worst, entrypointExitCode(r.verdict));
         }
         return { code: worst, out: sink.out, err: sink.err };
       }

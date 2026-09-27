@@ -50,6 +50,18 @@ export function classifyEntrypointResult(r: ExecResult): EntrypointCheck {
   return { verdict: 'live', code: r.code, reason: 'produced output' };
 }
 
+/**
+ * Map a verdict to the scriptable exit code ADR-0002 defines (live=0 < blocked=1 <
+ * suspicious-silent=2, so `Math.max` over several results yields the worst one). Extracted
+ * 2026-09-27: `verify-entrypoint` and `verify-entrypoints` (packages/cli/src/index.ts) each
+ * duplicated this exact ternary — flagged as a non-blocking follow-up in the 2026-09-08
+ * report ("extract a shared helper") and left untouched by every evaluation-adapters night
+ * since (#18, #26, #35). Pure — no I/O.
+ */
+export function entrypointExitCode(verdict: EntrypointVerdict): number {
+  return verdict === 'live' ? 0 : verdict === 'blocked' ? 1 : 2;
+}
+
 /** One configured evaluator entrypoint's classification, labelled with its config key + command. */
 export interface ConfiguredEntrypointResult extends EntrypointCheck {
   label: string;
