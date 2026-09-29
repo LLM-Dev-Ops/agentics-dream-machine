@@ -56,6 +56,20 @@ function makeSink() {
   };
 }
 
+/**
+ * Read a boolean-semantic flag. `parseArgs` cannot itself tell a boolean flag
+ * from a string one (`--no-color` and `--path` share the same `--key val`
+ * grammar), so a flag meant as a switch must accept the forms a user
+ * reasonably tries: bare (`--no-color`), `--no-color=true`, and
+ * `--no-color true` — not just the bare boolean `parseArgs` happens to
+ * produce when nothing follows the flag.
+ */
+export function flagBool(v: string | boolean | undefined): boolean {
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'string') return v === 'true' || v === '1' || v === 'yes';
+  return false;
+}
+
 /** Minimal flag parser: --key val, --key=val, --bool, positionals. */
 export function parseArgs(argv: string[]): { _: string[]; flags: Record<string, string | boolean> } {
   const _: string[] = [];
@@ -327,7 +341,7 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
         } catch {
           md = emptyLedger();
         }
-        sink.log(renderDashboard(md, { noColor: flags['no-color'] === true, repo: flags.repo as string | undefined }));
+        sink.log(renderDashboard(md, { noColor: flagBool(flags['no-color']), repo: flags.repo as string | undefined }));
         return { code: 0, out: sink.out, err: sink.err };
       }
 
