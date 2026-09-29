@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { run, parseArgs, VERSION, type IO } from './index.js';
+import { run, parseArgs, flagBool, VERSION, type IO } from './index.js';
 import { renderDashboard } from './tui.js';
 import { appendRow, emptyLedger, type LedgerRow } from '@dream-machine/ledger';
 import { stamp } from '@dream-machine/witness';
@@ -41,6 +41,22 @@ describe('parseArgs', () => {
     expect(flags.out).toBe('x.md');
     expect(flags.env).toBe('e1');
     expect(flags['no-color']).toBe(true);
+  });
+});
+
+describe('flagBool', () => {
+  it('treats the bare boolean and common truthy string forms as true', () => {
+    expect(flagBool(true)).toBe(true);
+    expect(flagBool('true')).toBe(true);
+    expect(flagBool('1')).toBe(true);
+    expect(flagBool('yes')).toBe(true);
+  });
+  it('treats falsy/absent values as false, including the literal string "false"', () => {
+    expect(flagBool(false)).toBe(false);
+    expect(flagBool(undefined)).toBe(false);
+    expect(flagBool('false')).toBe(false);
+    expect(flagBool('0')).toBe(false);
+    expect(flagBool('')).toBe(false);
   });
 });
 
@@ -296,5 +312,22 @@ describe('tui', () => {
     for (let i = 0; i < 14; i++) md = appendRow(md, sampleRow({ pr: `#${i}`, verdict: 'INCONCLUSIVE' }));
     const frame = renderDashboard(md, { noColor: true });
     expect(frame).toContain('zero merges');
+  });
+  it('--no-color=true (equals form) disables color the same as the bare flag', async () => {
+    const md = appendRow(emptyLedger(), sampleRow());
+    const bare = await run(['tui', '--path', 'L.md', '--no-color'], mockIO({ 'L.md': md }));
+    const equals = await run(['tui', '--path', 'L.md', '--no-color=true'], mockIO({ 'L.md': md }));
+    expect(equals.out).toBe(bare.out);
+  });
+  it('--no-color true (space-separated value form) disables color the same as the bare flag', async () => {
+    const md = appendRow(emptyLedger(), sampleRow());
+    const bare = await run(['tui', '--path', 'L.md', '--no-color'], mockIO({ 'L.md': md }));
+    const spaced = await run(['tui', '--no-color', 'true', '--path', 'L.md'], mockIO({ 'L.md': md }));
+    expect(spaced.out).toBe(bare.out);
+  });
+  it('omitting --no-color still renders color (guards against a hollow always-true fix)', async () => {
+    const md = appendRow(emptyLedger(), sampleRow());
+    const r = await run(['tui', '--path', 'L.md'], mockIO({ 'L.md': md }));
+    expect(r.out).toMatch(/\x1b\[[0-9;]*m/);
   });
 });
