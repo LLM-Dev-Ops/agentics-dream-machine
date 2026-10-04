@@ -56,6 +56,14 @@ function makeSink() {
   };
 }
 
+/**
+ * NO_COLOR (https://no-color.org/): present and non-empty disables color,
+ * regardless of value — so `NO_COLOR=0` still means "no color".
+ */
+export function isNoColorEnv(env: Record<string, string | undefined>): boolean {
+  return typeof env.NO_COLOR === 'string' && env.NO_COLOR !== '';
+}
+
 /** Minimal flag parser: --key val, --key=val, --bool, positionals. */
 export function parseArgs(argv: string[]): { _: string[]; flags: Record<string, string | boolean> } {
   const _: string[] = [];
@@ -327,7 +335,8 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
         } catch {
           md = emptyLedger();
         }
-        sink.log(renderDashboard(md, { noColor: flags['no-color'] === true, repo: flags.repo as string | undefined }));
+        const noColor = flags['no-color'] === true || isNoColorEnv(io.env);
+        sink.log(renderDashboard(md, { noColor, repo: flags.repo as string | undefined }));
         return { code: 0, out: sink.out, err: sink.err };
       }
 
