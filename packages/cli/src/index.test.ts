@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { run, parseArgs, VERSION, type IO } from './index.js';
+import { run, parseArgs, isNoColorEnv, VERSION, type IO } from './index.js';
 import { renderDashboard } from './tui.js';
 import { appendRow, emptyLedger, type LedgerRow } from '@dream-machine/ledger';
 import { stamp } from '@dream-machine/witness';
 
-function mockIO(files: Record<string, string> = {}): IO & { files: Record<string, string> } {
+function mockIO(
+  files: Record<string, string> = {},
+  env: Record<string, string | undefined> = {},
+): IO & { files: Record<string, string> } {
   const store = { ...files };
   return {
     files: store,
@@ -16,7 +19,7 @@ function mockIO(files: Record<string, string> = {}): IO & { files: Record<string
       store[p] = c;
     },
     now: () => '2026-08-13',
-    env: {},
+    env,
   };
 }
 
@@ -296,5 +299,42 @@ describe('tui', () => {
     for (let i = 0; i < 14; i++) md = appendRow(md, sampleRow({ pr: `#${i}`, verdict: 'INCONCLUSIVE' }));
     const frame = renderDashboard(md, { noColor: true });
     expect(frame).toContain('zero merges');
+  });
+
+  // https://no-color.org/: present and non-empty disables color, regardless
+  // of the flag — a user who sets NO_COLOR globally never sees raw ANSI.
+  // Uses an empty ledger so these assertions stay scoped to this candidate
+  // (env wiring) and don't entangle with the pre-existing, separately
+  // tracked verdictColor-leak defect on the VERDICT column (issue #38/PR #39).
+  it('honors NO_COLOR env var with no --no-color flag', async () => {
+    const r = await run(['tui', '--path', 'L.md'], mockIO({ 'L.md': emptyLedger() }, { NO_COLOR: '1' }));
+    expect(r.code).toBe(0);
+    expect(r.out).not.toContain('\x1b[');
+  });
+  it('treats NO_COLOR as disabling color regardless of its value', async () => {
+    const r = await run(['tui', '--path', 'L.md'], mockIO({ 'L.md': emptyLedger() }, { NO_COLOR: '0' }));
+    expect(r.out).not.toContain('\x1b[');
+  });
+  it('ignores an empty-string NO_COLOR (per spec: must be non-empty)', async () => {
+    const r = await run(['tui', '--path', 'L.md'], mockIO({ 'L.md': emptyLedger() }, { NO_COLOR: '' }));
+    expect(r.out).toContain('\x1b[');
+  });
+  it('still honors an explicit --no-color flag with no NO_COLOR env set', async () => {
+    const r = await run(['tui', '--path', 'L.md', '--no-color'], mockIO({ 'L.md': emptyLedger() }, {}));
+    expect(r.out).not.toContain('\x1b[');
+  });
+});
+
+describe('isNoColorEnv', () => {
+  it('is false when NO_COLOR is unset', () => {
+    expect(isNoColorEnv({})).toBe(false);
+  });
+  it('is false when NO_COLOR is an empty string', () => {
+    expect(isNoColorEnv({ NO_COLOR: '' })).toBe(false);
+  });
+  it('is true for any non-empty value, including "0" and "false"', () => {
+    expect(isNoColorEnv({ NO_COLOR: '0' })).toBe(true);
+    expect(isNoColorEnv({ NO_COLOR: 'false' })).toBe(true);
+    expect(isNoColorEnv({ NO_COLOR: '1' })).toBe(true);
   });
 });
