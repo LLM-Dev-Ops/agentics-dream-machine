@@ -298,3 +298,46 @@ describe('tui', () => {
     expect(frame).toContain('zero merges');
   });
 });
+
+// This repo's own prompt compiler locks its output with a self-referential
+// golden-snapshot test (2026-09-10, packages/compile) so config→prompt drift
+// becomes a reviewable diff instead of a silent divergence. That report's own
+// "3 concrete next steps" flagged that the CLI's machine-readable outputs
+// (`ledger signals`'s JSON, `verify-entrypoints`'s per-line format) had no
+// equivalent — every test above asserts only a substring or a property, never
+// the full shape, so a format change (a renamed JSON key, a reordered line)
+// could land with every existing assertion still green. These two tests close
+// that gap for this rotation's `golden-snapshots` scan.
+describe('golden-snapshot: CLI machine-readable output shapes', () => {
+  it('ledger signals: JSON shape is stable for a fixed ledger fixture', async () => {
+    let md = emptyLedger();
+    const fixture: Array<Partial<LedgerRow>> = [
+      { date: '2026-08-13', deep: 'security-adversarial', finding: 'f1', pr: '#1', verdict: 'ACCEPT' },
+      { date: '2026-08-14', deep: 'security-adversarial', finding: 'f1', pr: '#2', verdict: 'ACCEPT' },
+      { date: '2026-08-15', deep: 'security-adversarial', finding: 'f1', pr: '#3', verdict: 'REJECT' },
+    ];
+    for (const row of fixture) md = appendRow(md, sampleRow(row));
+    const r = await run(['ledger', 'signals', '--path', 'L.md'], mockIO({ 'L.md': md }));
+    expect(r.code).toBe(0);
+    expect(r.out).toMatchSnapshot();
+  });
+
+  it('verify-entrypoints: per-line output format is stable for a fixed mock IO', async () => {
+    const cfgJson = JSON.stringify({
+      repo: 'o/n',
+      cron: '0 9 * * *',
+      slots: [{ deep: 'd', scan: ['a', 'b'] }],
+      evaluatorEntrypoints: { bench: 'npm test', darwin: 'npx @metaharness/darwin evolve --sandbox real' },
+    });
+    const io: IO = {
+      ...mockIO({ 'dream.config.json': cfgJson }),
+      exec: async (cmd) =>
+        cmd === 'npm test'
+          ? { code: 0, stdout: '98 passed', stderr: '' }
+          : { code: 1, stdout: '', stderr: 'npm error could not determine executable to run' },
+    };
+    const r = await run(['verify-entrypoints'], io);
+    expect(r.code).toBe(1);
+    expect(r.out).toMatchSnapshot();
+  });
+});
