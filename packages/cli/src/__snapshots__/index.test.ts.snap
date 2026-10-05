@@ -1,0 +1,20 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`golden-snapshot: CLI machine-readable output shapes > ledger signals: JSON shape is stable for a fixed ledger fixture 1`] = `
+"{
+  "zeroMergeStreak": true,
+  "duplicateDirections": [
+    "f1"
+  ],
+  "lowScoreStreak": false,
+  "blockedEvalStreak": false,
+  "nightsConsidered": 3
+}
+"
+`;
+
+exports[`golden-snapshot: CLI machine-readable output shapes > verify-entrypoints: per-line output format is stable for a fixed mock IO 1`] = `
+"bench: live (exit 0) — produced output
+darwin: blocked (exit 1) — npm error could not determine executable to run
+"
+`;
