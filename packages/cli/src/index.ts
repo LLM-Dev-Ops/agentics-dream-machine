@@ -91,16 +91,22 @@ Commands:
   compile [config] [--out FILE]                        Compile config → routine prompt
   schedule [config] [--out FILE] [--env ID]            Emit the /schedule routine body
   ledger verify   [--path LEDGER.md]                   Structurally verify a ledger
-  ledger signals  [--path LEDGER.md]                   Print STEP 1.1 learning signals
+  ledger signals  [--path LEDGER.md] [--open N] [--backlog-threshold N]
+                                                         Print STEP 1.1 learning signals
   ledger stats    [--path LEDGER.md]                   Verdict distribution
   ledger append   --path L --date .. --deep .. ...     Append one row
   witness stamp   <report-file> <commit>               Compute the witness triple
   witness verify  <report-file> <commit> <witness>     Verify a claimed witness
   verify-entrypoint <label> --cmd "<command>"           Classify an evaluator entrypoint's liveness
   verify-entrypoints [config]                           Classify every evaluatorEntrypoints in a dream.config
-  tui             [--path LEDGER.md] [--no-color]      Render the dashboard
+  tui             [--path LEDGER.md] [--no-color] [--open N]  Render the dashboard
   version | --version                                  Print version
   help    | --help                                     This help
+
+--open is the count of currently open, unreviewed dream-cycle candidate PRs
+(e.g. from 'gh pr list --label dream-cycle --state open --json number').
+Without it, backlog saturation is reported as unknown, never as a false
+"not saturated". --backlog-threshold overrides the default (10).
 
 The Dream Machine never merges. Evaluation is not promotion — a human decides.
 Docs: https://ruvnet.github.io/dream-machine/`;
@@ -108,6 +114,17 @@ Docs: https://ruvnet.github.io/dream-machine/`;
 async function loadConfig(io: IO, path: string): Promise<DreamConfig> {
   const raw = await io.readFile(path);
   return JSON.parse(raw) as DreamConfig;
+}
+
+/**
+ * Parse a non-negative-integer flag (e.g. `--open 12`). Absent, non-numeric,
+ * negative, or fractional values stay `undefined` — a nonsensical count must
+ * never be treated as real data (see `backlogDataAvailable`/`mergeDataAvailable`).
+ */
+function parseNumberFlag(flag: string | boolean | undefined): number | undefined {
+  if (typeof flag !== 'string' || flag.trim() === '') return undefined;
+  const n = Number(flag);
+  return Number.isInteger(n) && n >= 0 ? n : undefined;
 }
 
 /** Run a dream-machine command. Never throws — errors become {code:1}. */
@@ -198,7 +215,9 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
         }
         if (sub === 'signals') {
           const { rows } = parseLedger(md);
-          sink.log(JSON.stringify(learningSignals(rows), null, 2));
+          const openCandidateCount = parseNumberFlag(flags.open);
+          const backlogThreshold = parseNumberFlag(flags['backlog-threshold']);
+          sink.log(JSON.stringify(learningSignals(rows, { openCandidateCount, backlogThreshold }), null, 2));
           return { code: 0, out: sink.out, err: sink.err };
         }
         if (sub === 'stats') {
@@ -327,7 +346,14 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
         } catch {
           md = emptyLedger();
         }
-        sink.log(renderDashboard(md, { noColor: flags['no-color'] === true, repo: flags.repo as string | undefined }));
+        sink.log(
+          renderDashboard(md, {
+            noColor: flags['no-color'] === true,
+            repo: flags.repo as string | undefined,
+            openCandidateCount: parseNumberFlag(flags.open),
+            backlogThreshold: parseNumberFlag(flags['backlog-threshold']),
+          }),
+        );
         return { code: 0, out: sink.out, err: sink.err };
       }
 

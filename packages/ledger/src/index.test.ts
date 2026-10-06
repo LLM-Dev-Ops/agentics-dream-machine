@@ -147,6 +147,27 @@ describe('learning signals', () => {
     const { rows } = parseLedger(l);
     expect(learningSignals(rows).blockedEvalStreak).toBe(true);
   });
+
+  it('reports backlog data as unknown (not "not saturated") when openCandidateCount is omitted', () => {
+    const { rows } = parseLedger(appendRow(emptyLedger(), row()));
+    const s = learningSignals(rows);
+    expect(s.backlogDataAvailable).toBe(false);
+    expect(s.backlogSaturated).toBe(false);
+  });
+
+  it('flags backlog saturation once openCandidateCount reaches the threshold', () => {
+    const { rows } = parseLedger(appendRow(emptyLedger(), row()));
+    expect(learningSignals(rows, { openCandidateCount: 9 }).backlogSaturated).toBe(false);
+    const saturated = learningSignals(rows, { openCandidateCount: 10 });
+    expect(saturated.backlogDataAvailable).toBe(true);
+    expect(saturated.backlogSaturated).toBe(true);
+  });
+
+  it('honors a custom backlogThreshold', () => {
+    const { rows } = parseLedger(appendRow(emptyLedger(), row()));
+    expect(learningSignals(rows, { openCandidateCount: 3, backlogThreshold: 3 }).backlogSaturated).toBe(true);
+    expect(learningSignals(rows, { openCandidateCount: 2, backlogThreshold: 3 }).backlogSaturated).toBe(false);
+  });
 });
 
 describe('verdictStats', () => {
