@@ -191,6 +191,15 @@ export interface LearningSignals {
   blockedEvalStreak: boolean;
   /** Count of nights considered. */
   nightsConsidered: number;
+  /** Whether `openCandidateCount` was supplied — false means "unknown", not "not saturated". */
+  backlogDataAvailable: boolean;
+  /**
+   * `openCandidateCount` >= `backlogThreshold` → the review queue, not candidate
+   * generation, is the bottleneck; bias away from shipping another unreviewed
+   * candidate PR and toward escalation/verification-only nights. Only ever
+   * `true` when {@link backlogDataAvailable} is also `true`.
+   */
+  backlogSaturated: boolean;
 }
 
 export interface SignalOptions {
@@ -200,6 +209,15 @@ export interface SignalOptions {
   recentScores?: number[];
   /** Which PR numbers actually merged (so we can detect the zero-merge streak). */
   mergedPrNumbers?: Set<string>;
+  /**
+   * Count of currently open, unreviewed dream-cycle candidate PRs — e.g. from
+   * `gh pr list --label dream-cycle --state open --json number` (or the
+   * equivalent GitHub API call), counted by the caller and passed in. Never
+   * fetched here: this function stays pure, no I/O, no network calls.
+   */
+  openCandidateCount?: number;
+  /** Open-candidate count at/above which the backlog counts as saturated. Default 10. */
+  backlogThreshold?: number;
 }
 
 function prNumber(pr: string): string | null {
@@ -237,12 +255,20 @@ export function learningSignals(rows: LedgerRow[], opts: SignalOptions = {}): Le
   const blockedEvalStreak =
     recent.length >= 3 && lastThreeEvals.length === 3 && lastThreeEvals.every((e) => e === 'blocked');
 
+  // Backlog saturation: requires a real count — absent `openCandidateCount` is
+  // "unknown", never coerced into "not saturated" (same honesty rule as above).
+  const backlogDataAvailable = opts.openCandidateCount !== undefined;
+  const backlogThreshold = opts.backlogThreshold ?? 10;
+  const backlogSaturated = backlogDataAvailable && (opts.openCandidateCount as number) >= backlogThreshold;
+
   return {
     zeroMergeStreak,
     duplicateDirections,
     lowScoreStreak,
     blockedEvalStreak,
     nightsConsidered: recent.length,
+    backlogDataAvailable,
+    backlogSaturated,
   };
 }
 
