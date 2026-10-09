@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { run, parseArgs, VERSION, type IO } from './index.js';
+import { run, parseArgs, flagBool, isNoColorEnv, VERSION, type IO } from './index.js';
 import { renderDashboard } from './tui.js';
 import { appendRow, emptyLedger, type LedgerRow } from '@dream-machine/ledger';
 import { stamp } from '@dream-machine/witness';
 
-function mockIO(files: Record<string, string> = {}): IO & { files: Record<string, string> } {
+function mockIO(
+  files: Record<string, string> = {},
+  env: Record<string, string | undefined> = {},
+): IO & { files: Record<string, string> } {
   const store = { ...files };
   return {
     files: store,
@@ -16,7 +19,7 @@ function mockIO(files: Record<string, string> = {}): IO & { files: Record<string
       store[p] = c;
     },
     now: () => '2026-08-13',
-    env: {},
+    env,
   };
 }
 
@@ -41,6 +44,36 @@ describe('parseArgs', () => {
     expect(flags.out).toBe('x.md');
     expect(flags.env).toBe('e1');
     expect(flags['no-color']).toBe(true);
+  });
+});
+
+describe('flagBool', () => {
+  it('treats the bare boolean and common truthy string forms as true', () => {
+    expect(flagBool(true)).toBe(true);
+    expect(flagBool('true')).toBe(true);
+    expect(flagBool('1')).toBe(true);
+    expect(flagBool('yes')).toBe(true);
+  });
+  it('treats falsy/absent values as false, including the literal string "false"', () => {
+    expect(flagBool(false)).toBe(false);
+    expect(flagBool(undefined)).toBe(false);
+    expect(flagBool('false')).toBe(false);
+    expect(flagBool('0')).toBe(false);
+    expect(flagBool('')).toBe(false);
+  });
+});
+
+describe('isNoColorEnv', () => {
+  it('is false when NO_COLOR is unset', () => {
+    expect(isNoColorEnv({})).toBe(false);
+  });
+  it('is false when NO_COLOR is an empty string', () => {
+    expect(isNoColorEnv({ NO_COLOR: '' })).toBe(false);
+  });
+  it('is true for any non-empty value, including "0" and "false"', () => {
+    expect(isNoColorEnv({ NO_COLOR: '0' })).toBe(true);
+    expect(isNoColorEnv({ NO_COLOR: 'false' })).toBe(true);
+    expect(isNoColorEnv({ NO_COLOR: '1' })).toBe(true);
   });
 });
 
@@ -296,5 +329,58 @@ describe('tui', () => {
     for (let i = 0; i < 14; i++) md = appendRow(md, sampleRow({ pr: `#${i}`, verdict: 'INCONCLUSIVE' }));
     const frame = renderDashboard(md, { noColor: true });
     expect(frame).toContain('zero merges');
+  });
+
+  // Consolidates three previously-separate, unmerged fixes to the same
+  // --no-color/NO_COLOR contract (verdictColor leak, flag value-forms,
+  // env var) into one candidate, so they can't land as conflicting PRs.
+  it('noColor strips every VERDICT-cell escape too, not just the borders', () => {
+    let md = emptyLedger();
+    for (const verdict of ['ACCEPT', 'REJECT', 'INCONCLUSIVE', 'ACCEPT / REJECT']) {
+      md = appendRow(md, sampleRow({ verdict }));
+    }
+    const frame = renderDashboard(md, { noColor: true });
+    expect(frame).not.toMatch(/\x1b\[[0-9;]*m/);
+  });
+  it('the default colored path still emits ANSI for every verdict (guards against a hollow fix)', () => {
+    let md = emptyLedger();
+    for (const verdict of ['ACCEPT', 'REJECT', 'INCONCLUSIVE', 'ACCEPT / REJECT']) {
+      md = appendRow(md, sampleRow({ verdict }));
+    }
+    const frame = renderDashboard(md);
+    expect(frame).toMatch(/\x1b\[32m/); // ACCEPT -> green
+    expect(frame).toMatch(/\x1b\[31m/); // REJECT -> red
+    expect(frame).toMatch(/\x1b\[33m/); // INCONCLUSIVE -> yellow
+    expect(frame).toMatch(/\x1b\[38;5;245m/); // fallback -> gray
+  });
+  it('--no-color=true (equals form) disables color the same as the bare flag', async () => {
+    const md = appendRow(emptyLedger(), sampleRow());
+    const bare = await run(['tui', '--path', 'L.md', '--no-color'], mockIO({ 'L.md': md }));
+    const equals = await run(['tui', '--path', 'L.md', '--no-color=true'], mockIO({ 'L.md': md }));
+    expect(equals.out).toBe(bare.out);
+  });
+  it('--no-color true (space-separated value form) disables color the same as the bare flag', async () => {
+    const md = appendRow(emptyLedger(), sampleRow());
+    const bare = await run(['tui', '--path', 'L.md', '--no-color'], mockIO({ 'L.md': md }));
+    const spaced = await run(['tui', '--no-color', 'true', '--path', 'L.md'], mockIO({ 'L.md': md }));
+    expect(spaced.out).toBe(bare.out);
+  });
+  it('honors NO_COLOR env var with no --no-color flag', async () => {
+    const r = await run(['tui', '--path', 'L.md'], mockIO({ 'L.md': emptyLedger() }, { NO_COLOR: '1' }));
+    expect(r.code).toBe(0);
+    expect(r.out).not.toContain('\x1b[');
+  });
+  it('treats NO_COLOR as disabling color regardless of its value', async () => {
+    const r = await run(['tui', '--path', 'L.md'], mockIO({ 'L.md': emptyLedger() }, { NO_COLOR: '0' }));
+    expect(r.out).not.toContain('\x1b[');
+  });
+  it('ignores an empty-string NO_COLOR (per spec: must be non-empty)', async () => {
+    const r = await run(['tui', '--path', 'L.md'], mockIO({ 'L.md': emptyLedger() }, { NO_COLOR: '' }));
+    expect(r.out).toContain('\x1b[');
+  });
+  it('omitting --no-color and NO_COLOR still renders color (guards against a hollow always-true fix)', async () => {
+    const md = appendRow(emptyLedger(), sampleRow());
+    const r = await run(['tui', '--path', 'L.md'], mockIO({ 'L.md': md }));
+    expect(r.out).toMatch(/\x1b\[[0-9;]*m/);
   });
 });
