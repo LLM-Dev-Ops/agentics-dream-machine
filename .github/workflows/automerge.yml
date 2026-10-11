@@ -9,10 +9,17 @@ name: Guarded auto-merge
 # Anything touching a benchmark, gate, threshold, security boundary, workflow,
 # or dependency manifest is human-review-only, full stop. The nightly session
 # itself never runs the merge — this auditable job does, under these conditions.
+#
+# `ready_for_review` is included alongside `labeled`/`opened`/`synchronize`/
+# `reopened` so the guard re-evaluates if a PR is labeled `automerge-safe`
+# while still a draft (GitHub permits labeling drafts) and only afterward
+# marked ready for review: `gh pr merge --auto` rejects drafts, so without
+# this type the job fires once, fails, and never retries once the PR stops
+# being a draft.
 
 on:
   pull_request_target:
-    types: [labeled, opened, synchronize, reopened]
+    types: [labeled, opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: write
