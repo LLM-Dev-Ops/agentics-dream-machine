@@ -13,6 +13,7 @@ import {
   emptyLedger,
   learningSignals,
   verdictStats,
+  conflictRisks,
   type LedgerRow,
 } from '@dream-machine/ledger';
 import { stamp, verify, verifySteps } from '@dream-machine/witness';
@@ -93,6 +94,7 @@ Commands:
   ledger verify   [--path LEDGER.md]                   Structurally verify a ledger
   ledger signals  [--path LEDGER.md]                   Print STEP 1.1 learning signals
   ledger stats    [--path LEDGER.md]                   Verdict distribution
+  ledger conflict-risk --files-json '{"#12":[...]}'     File-overlap risk between open candidate PRs
   ledger append   --path L --date .. --deep .. ...     Append one row
   witness stamp   <report-file> <commit>               Compute the witness triple
   witness verify  <report-file> <commit> <witness>     Verify a claimed witness
@@ -206,6 +208,25 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
           sink.log(JSON.stringify(verdictStats(rows), null, 2));
           return { code: 0, out: sink.out, err: sink.err };
         }
+        if (sub === 'conflict-risk') {
+          const raw = flags['files-json'];
+          if (typeof raw !== 'string') {
+            sink.error(
+              'usage: dream-machine ledger conflict-risk --files-json \'{"#12":["a.ts"],"#16":["a.ts"]}\'',
+            );
+            return { code: 1, out: sink.out, err: sink.err };
+          }
+          let parsed: Record<string, string[]>;
+          try {
+            parsed = JSON.parse(raw) as Record<string, string[]>;
+          } catch {
+            sink.error('conflict-risk: --files-json is not valid JSON');
+            return { code: 1, out: sink.out, err: sink.err };
+          }
+          const candidates = Object.entries(parsed).map(([label, files]) => ({ label, files }));
+          sink.log(JSON.stringify(conflictRisks(candidates), null, 2));
+          return { code: 0, out: sink.out, err: sink.err };
+        }
         if (sub === 'append') {
           const row: LedgerRow = {
             date: (flags.date as string) || io.now(),
@@ -224,7 +245,7 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
           sink.log(`appended row to ${path} (verdict=${row.verdict})`);
           return { code: 0, out: sink.out, err: sink.err };
         }
-        sink.error('ledger: expected sub-command verify|signals|stats|append');
+        sink.error('ledger: expected sub-command verify|signals|stats|append|conflict-risk');
         return { code: 1, out: sink.out, err: sink.err };
       }
 

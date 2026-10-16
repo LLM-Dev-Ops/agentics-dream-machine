@@ -255,3 +255,62 @@ export function verdictStats(rows: LedgerRow[]): Record<string, number> {
   }
   return stats;
 }
+
+// ---------------------------------------------------------------------------
+// Candidate conflict risk — detects open candidate PRs that are no longer
+// independently mergeable because they edited the same files from the same
+// stale base. Caller supplies each candidate's real changed-file list (e.g.
+// from `git diff --name-only` or the GitHub API); this stays pure, same
+// honesty-signal pattern as `mergeDataAvailable`/`backlogDataAvailable` —
+// no git/network call happens inside this module.
+// ---------------------------------------------------------------------------
+
+export interface CandidateFiles {
+  /** Human-readable candidate label, e.g. "#12" or a branch name. */
+  label: string;
+  /** Changed file paths, relative to the repo root. */
+  files: string[];
+}
+
+export interface ConflictRisk {
+  a: string;
+  b: string;
+  /** Changed files both candidates touch (excluding `ignorePaths`). */
+  sharedFiles: string[];
+}
+
+/**
+ * Paths every dream-cycle night touches by design (e.g. the append-only
+ * ledger) — overlapping there is expected and trivially resolved, so it
+ * would otherwise swamp this signal with a "conflict" on every single pair.
+ */
+export const DEFAULT_CONFLICT_IGNORE_PATHS: ReadonlySet<string> = new Set([
+  'docs/dream-cycle/LEDGER.md',
+]);
+
+/**
+ * File-overlap conflict risk between candidates, pairwise. This is a
+ * conservative heuristic (file-level, not line-level): it can flag a pair
+ * that `git merge` would actually resolve cleanly (two edits to the same
+ * file in disjoint regions), but it will never miss a pair that touches no
+ * common file, and in practice (see this repo's own 2026-10-16 evaluation
+ * receipt) every pair it flags that was checked against a real `git merge
+ * --no-commit` did conflict in at least one of the flagged files.
+ */
+export function conflictRisks(
+  candidates: CandidateFiles[],
+  opts: { ignorePaths?: ReadonlySet<string> } = {},
+): ConflictRisk[] {
+  const ignore = opts.ignorePaths ?? DEFAULT_CONFLICT_IGNORE_PATHS;
+  const risks: ConflictRisk[] = [];
+  for (let i = 0; i < candidates.length; i++) {
+    const filesA = new Set(candidates[i].files.filter((f) => !ignore.has(f)));
+    for (let j = i + 1; j < candidates.length; j++) {
+      const sharedFiles = candidates[j].files.filter((f) => !ignore.has(f) && filesA.has(f));
+      if (sharedFiles.length) {
+        risks.push({ a: candidates[i].label, b: candidates[j].label, sharedFiles });
+      }
+    }
+  }
+  return risks;
+}

@@ -142,6 +142,25 @@ describe('ledger', () => {
     expect(r.code).toBe(0);
     expect(io.files['L.md']).toContain('| perf |');
   });
+  it('conflict-risk flags a shared file between two candidates', async () => {
+    const r = await run(
+      ['ledger', 'conflict-risk', '--files-json', '{"#12":["a.ts"],"#16":["a.ts"],"#69":["b.ts"]}'],
+      mockIO(),
+    );
+    expect(r.code).toBe(0);
+    const risks = JSON.parse(r.out);
+    expect(risks).toEqual([{ a: '#12', b: '#16', sharedFiles: ['a.ts'] }]);
+  });
+  it('conflict-risk requires --files-json', async () => {
+    const r = await run(['ledger', 'conflict-risk'], mockIO());
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('--files-json');
+  });
+  it('conflict-risk rejects invalid JSON', async () => {
+    const r = await run(['ledger', 'conflict-risk', '--files-json', 'not json'], mockIO());
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('not valid JSON');
+  });
 });
 
 describe('witness', () => {

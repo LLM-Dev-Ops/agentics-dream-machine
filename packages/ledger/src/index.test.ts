@@ -8,6 +8,7 @@ import {
   learningSignals,
   verdictStats,
   escapeCell,
+  conflictRisks,
   LEDGER_COLUMNS,
   type LedgerRow,
 } from './index.js';
@@ -159,4 +160,105 @@ describe('verdictStats', () => {
     const s = verdictStats(parseLedger(l).rows);
     expect(s).toEqual({ ACCEPT: 1, REJECT: 1, INCONCLUSIVE: 2, other: 0 });
   });
+});
+
+describe('conflictRisks', () => {
+  it('flags no risk when candidates touch disjoint files', () => {
+    const risks = conflictRisks([
+      { label: 'a', files: ['packages/x/a.ts'] },
+      { label: 'b', files: ['packages/y/b.ts'] },
+    ]);
+    expect(risks).toEqual([]);
+  });
+
+  it('flags a shared non-ignored file between two candidates', () => {
+    const risks = conflictRisks([
+      { label: 'a', files: ['packages/ledger/src/index.ts', 'docs/dream-cycle/LEDGER.md'] },
+      { label: 'b', files: ['packages/ledger/src/index.ts'] },
+    ]);
+    expect(risks).toEqual([{ a: 'a', b: 'b', sharedFiles: ['packages/ledger/src/index.ts'] }]);
+  });
+
+  it('ignores docs/dream-cycle/LEDGER.md by default (every night appends there)', () => {
+    const risks = conflictRisks([
+      { label: 'a', files: ['docs/dream-cycle/LEDGER.md'] },
+      { label: 'b', files: ['docs/dream-cycle/LEDGER.md'] },
+    ]);
+    expect(risks).toEqual([]);
+  });
+
+  it('a custom ignorePaths set overrides the default', () => {
+    const risks = conflictRisks(
+      [
+        { label: 'a', files: ['x.ts'] },
+        { label: 'b', files: ['x.ts'] },
+      ],
+      { ignorePaths: new Set(['x.ts']) },
+    );
+    expect(risks).toEqual([]);
+  });
+
+  it(
+    'reproduces this repo\'s real 2026-10-16 evaluation receipt: PR #12, #16, #58 ' +
+      'pairwise-flag on their real changed-file lists; #58 x #69 does not',
+    () => {
+      // Real changed-file lists, read from GitHub (`pull_request_read`) on
+      // 2026-10-16, for this repo's actual open ledger-signals-lineage PRs.
+      const pr12 = {
+        label: '#12',
+        files: [
+          'packages/ledger/src/index.ts',
+          'packages/ledger/src/index.test.ts',
+          'packages/cli/src/index.ts',
+          'packages/cli/src/index.test.ts',
+          'packages/cli/src/tui.ts',
+          'docs/dream-cycle/2026-09-09-developer-experience-report.md',
+          'docs/dream-cycle/LEDGER.md',
+        ],
+      };
+      const pr16 = {
+        label: '#16',
+        files: [
+          'packages/ledger/src/index.ts',
+          'packages/ledger/src/index.test.ts',
+          'packages/cli/src/index.ts',
+          'packages/cli/src/index.test.ts',
+          'docs/dream-cycle/2026-09-11-ledger-signals-report.md',
+          'docs/dream-cycle/LEDGER.md',
+        ],
+      };
+      const pr58 = {
+        label: '#58',
+        files: [
+          'packages/ledger/src/index.ts',
+          'packages/ledger/src/index.test.ts',
+          'packages/cli/src/index.ts',
+          'packages/cli/src/index.test.ts',
+          'packages/cli/src/tui.ts',
+          'docs/dream-cycle/2026-10-06-ledger-signals-report.md',
+          'docs/dream-cycle/LEDGER.md',
+        ],
+      };
+      const pr69 = {
+        label: '#69',
+        files: [
+          '.github/workflows/automerge.yml',
+          'packages/compile/src/automergeWorkflowTriggers.ts',
+          'packages/compile/src/automergeWorkflowTriggers.test.ts',
+          'docs/dream-cycle/2026-10-11-ledger-signals-report.md',
+          'docs/dream-cycle/LEDGER.md',
+        ],
+      };
+
+      const risks = conflictRisks([pr12, pr16, pr58, pr69]);
+      const pairs = risks.map((r) => `${r.a}x${r.b}`).sort();
+      // Ground truth, confirmed tonight by real `git merge --no-commit --no-ff`
+      // between the actual PR branches: #12x#16, #12x#58, #16x#58 all produced
+      // real CONTENT conflicts beyond the expected LEDGER.md row; #58x#69
+      // conflicted only in LEDGER.md (ignored here) because they touch
+      // disjoint packages.
+      expect(pairs).toEqual(['#12x#16', '#12x#58', '#16x#58']);
+      expect(risks.every((r) => r.sharedFiles.length > 0)).toBe(true);
+    },
+  );
 });
