@@ -36,6 +36,27 @@ describe('classifyEntrypointResult', () => {
     const r = classifyEntrypointResult({ code: 0, stdout: '', stderr: 'warning: slow test detected' });
     expect(r.verdict).toBe('live');
   });
+
+  it('flags darwin\'s stale-run-id collision as blocked+staleState, not a generic failure (reproduces npx @metaharness/darwin evolve . --sandbox mock run twice in the same cwd)', () => {
+    const r = classifyEntrypointResult({
+      code: 1,
+      stdout: '',
+      stderr:
+        'Error: darwin: autonomous or generated child id already exists: g1_v0\n' +
+        '    at evolve (file:///root/.npm/_npx/61e58f24e3ab1667/node_modules/@metaharness/darwin/dist/evolve.js:319:27)\n' +
+        '    at async main (file:///root/.npm/_npx/61e58f24e3ab1667/node_modules/@metaharness/darwin/dist/cli.js:273:20)',
+    });
+    expect(r.verdict).toBe('blocked');
+    expect(r.staleState).toBe(true);
+    expect(r.reason).toContain('child id already exists');
+    expect(r.reason).toContain('leftover state from a prior run');
+  });
+
+  it('does not set staleState on an unrelated blocked verdict', () => {
+    const r = classifyEntrypointResult({ code: 1, stdout: '', stderr: 'npm error could not determine executable to run' });
+    expect(r.verdict).toBe('blocked');
+    expect(r.staleState).toBeUndefined();
+  });
 });
 
 describe('classifyConfiguredEntrypoints', () => {

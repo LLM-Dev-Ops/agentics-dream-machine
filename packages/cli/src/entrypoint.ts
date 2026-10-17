@@ -27,15 +27,43 @@ export interface EntrypointCheck {
   verdict: EntrypointVerdict;
   code: number;
   reason: string;
+  /**
+   * true when a `blocked` verdict's cause is leftover local state from a *prior* run in this
+   * same working directory, not a genuine entrypoint failure. Reproduced 2026-10-17
+   * (evaluation-adapters night, SCAN=darwin): `npx @metaharness/darwin evolve . --sandbox mock`
+   * (the correct invocation, `<repo>` arg included) exits 0 and succeeds the first time, then
+   * deterministically fails every subsequent time in the same cwd with `Error: darwin:
+   * autonomous or generated child id already exists: g1_v0` — unaffected by `--seed`. Darwin
+   * persists run state under `.metaharness/` and never reuses/replaces an existing child id, so
+   * a second invocation (e.g. a STEP 0.5 control-plane probe followed by a STEP 12 evaluation in
+   * the same session, or any workspace reused across nights) is misclassified as "entrypoint
+   * down" when it is actually "stale local state from a run that already succeeded."
+   */
+  staleState?: boolean;
 }
+
+const STALE_STATE_PATTERN = /autonomous or generated .* id already exists/i;
 
 /** Classify a completed entrypoint invocation. Pure — no I/O. */
 export function classifyEntrypointResult(r: ExecResult): EntrypointCheck {
   if (r.code !== 0) {
+    const stderr = r.stderr.trim();
+    if (STALE_STATE_PATTERN.test(stderr)) {
+      return {
+        verdict: 'blocked',
+        code: r.code,
+        staleState: true,
+        reason:
+          `${stderr} — this is leftover state from a prior run in this same working directory, ` +
+          'not a genuine entrypoint failure; clean the tool\'s local state directory (e.g. ' +
+          '`.metaharness/`) or run in a fresh working directory, then retry before concluding ' +
+          'the entrypoint itself is down.',
+      };
+    }
     return {
       verdict: 'blocked',
       code: r.code,
-      reason: r.stderr.trim() || `exited ${r.code} with no stderr`,
+      reason: stderr || `exited ${r.code} with no stderr`,
     };
   }
   if (r.stdout.trim() === '' && r.stderr.trim() === '') {
