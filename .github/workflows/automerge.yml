@@ -26,6 +26,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.base.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
       - name: Check for protected-path changes
         id: guard
         env:
@@ -34,13 +37,16 @@ jobs:
         run: |
           files=$(gh pr view "$PR" --json files --jq '.files[].path')
           echo "changed files:"; echo "$files"
-          # Any match here disqualifies auto-merge.
-          protected='^(\.github/|packages/[^/]+/package\.json$|package\.json$|package-lock\.json$|.*/safety|.*/gate|.*(threshold|promotion|scorer).*|SECURITY\.md$)'
-          if echo "$files" | grep -qE "$protected"; then
+          # scripts/check-protected-paths.mjs is the single source of truth for
+          # this policy (unit-tested in scripts/check-protected-paths.test.mjs)
+          # — it exits 1 and names the match(es) iff any changed path is
+          # protected. Always run from the checked-out base ref above, so a
+          # PR cannot patch this guard and have the patch apply to itself.
+          if echo "$files" | node scripts/check-protected-paths.mjs; then
+            echo "blocked=false" >> "$GITHUB_OUTPUT"
+          else
             echo "blocked=true" >> "$GITHUB_OUTPUT"
             echo "::notice::Protected path touched — auto-merge disabled, human review required."
-          else
-            echo "blocked=false" >> "$GITHUB_OUTPUT"
           fi
       - name: Enable auto-merge (waits for required checks)
         if: steps.guard.outputs.blocked == 'false'
