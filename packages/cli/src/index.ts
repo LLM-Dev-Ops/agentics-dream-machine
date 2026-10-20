@@ -155,7 +155,13 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
           await io.writeFile(out, prompt);
           sink.log(`compiled ${cfg.repo} → ${out} (${prompt.length} bytes)`);
         } else {
-          sink.log(prompt);
+          // compile() already ends its template in exactly one trailing "\n"
+          // (so --out files and the schedule JSON's embedded prompt have a
+          // single trailing newline); sink.log() unconditionally appends its
+          // own "\n", so logging `prompt` verbatim double-newlines stdout.
+          // Strip the template's own trailing newline so printed output
+          // matches --out / `schedule` byte-for-byte.
+          sink.log(prompt.replace(/\n$/, ''));
         }
         return { code: 0, out: sink.out, err: sink.err };
       }
