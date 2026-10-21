@@ -142,6 +142,27 @@ describe('ledger', () => {
     expect(r.code).toBe(0);
     expect(io.files['L.md']).toContain('| perf |');
   });
+  it('merge-readiness requires --files-json', async () => {
+    const r = await run(['ledger', 'merge-readiness'], mockIO());
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('--files-json');
+  });
+  it('merge-readiness rejects malformed JSON without crashing', async () => {
+    const r = await run(['ledger', 'merge-readiness', '--files-json', '{not json'], mockIO());
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('invalid --files-json');
+  });
+  it('merge-readiness classifies real backlog branches by protected-path status', async () => {
+    const filesJson = JSON.stringify({
+      'dream/2026-10-18-security-adversarial': ['.github/workflows/automerge.yml', 'scripts/check-protected-paths.mjs'],
+      'dream/2026-10-20-compiler-parity': ['packages/compile/src/index.ts', 'docs/dream-cycle/LEDGER.md'],
+    });
+    const r = await run(['ledger', 'merge-readiness', '--files-json', filesJson], mockIO());
+    expect(r.code).toBe(0);
+    const report = JSON.parse(r.out);
+    expect(report.find((x: { branch: string }) => x.branch === 'dream/2026-10-18-security-adversarial').protectedPath).toBe(true);
+    expect(report.find((x: { branch: string }) => x.branch === 'dream/2026-10-20-compiler-parity').protectedPath).toBe(false);
+  });
 });
 
 describe('witness', () => {

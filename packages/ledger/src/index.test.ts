@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import {
   emptyLedger,
@@ -8,6 +10,8 @@ import {
   learningSignals,
   verdictStats,
   escapeCell,
+  protectedPathBlocked,
+  AUTOMERGE_PROTECTED_PATH_REGEX,
   LEDGER_COLUMNS,
   type LedgerRow,
 } from './index.js';
@@ -158,5 +162,97 @@ describe('verdictStats', () => {
     l = appendRow(l, row({ verdict: 'INCONCLUSIVE' }));
     const s = verdictStats(parseLedger(l).rows);
     expect(s).toEqual({ ACCEPT: 1, REJECT: 1, INCONCLUSIVE: 2, other: 0 });
+  });
+});
+
+describe('protectedPathBlocked', () => {
+  it('matches the real, checked-in automerge.yml protected regex verbatim (regression canary)', () => {
+    // Frozen baseline: if a future edit to automerge.yml changes the live regex
+    // without updating AUTOMERGE_PROTECTED_PATH_REGEX, this fails instead of the
+    // mirror silently drifting from the gate it claims to describe.
+    const workflowPath = fileURLToPath(new URL('../../../.github/workflows/automerge.yml', import.meta.url));
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const liveRegexLine = workflow.split('\n').find((l) => l.includes("protected='"));
+    expect(liveRegexLine).toBeDefined();
+    const live = liveRegexLine!.match(/protected='(.*)'/)?.[1];
+    expect(live).toBe(AUTOMERGE_PROTECTED_PATH_REGEX.source.replace(/\\\//g, '/'));
+  });
+
+  it('flags files the live guard would block', () => {
+    expect(protectedPathBlocked(['.github/workflows/ci.yml']).blocked).toBe(true);
+    expect(protectedPathBlocked(['package.json']).blocked).toBe(true);
+    expect(protectedPathBlocked(['package-lock.json']).blocked).toBe(true);
+    expect(protectedPathBlocked(['packages/cli/package.json']).blocked).toBe(true);
+    expect(protectedPathBlocked(['SECURITY.md']).blocked).toBe(true);
+    expect(protectedPathBlocked(['src/promotion-gate.ts']).blocked).toBe(true);
+    expect(protectedPathBlocked(['x/safety']).blocked).toBe(true);
+  });
+
+  it('does not flag ordinary source/doc/report changes', () => {
+    const r = protectedPathBlocked([
+      'packages/ledger/src/index.ts',
+      'packages/ledger/src/index.test.ts',
+      'docs/dream-cycle/2026-10-21-report.md',
+      'docs/dream-cycle/LEDGER.md',
+    ]);
+    expect(r.blocked).toBe(false);
+    expect(r.matches).toEqual([]);
+  });
+
+  it('reproduces the known, documented bypass gap (PR #83) — intentional, not a candidate bug', () => {
+    // The live regex (mirrored here) is case-sensitive and misses a nested
+    // manifest. This is the exact gap PR #83 (open, unmerged) proposes to close
+    // in automerge.yml itself; this mirror intentionally matches today's live
+    // behavior, including its known gap, until that fix lands.
+    expect(protectedPathBlocked(['PACKAGE.JSON']).blocked).toBe(false);
+    expect(protectedPathBlocked(['nested/dir/package.json']).blocked).toBe(false);
+  });
+
+  it('classifies the real changed-file lists of every currently-open dream-cycle PR that hit a protected path', () => {
+    // Real data from tonight's `git diff --name-only origin/main...origin/<branch>`
+    // against origin/main @ 2fba2550182d81b36423447221823e98e227482a.
+    const real: Record<string, string[]> = {
+      'dream/2026-09-21-ledger-signals': [
+        '.github/workflows/ci.yml',
+        'docs/adrs/ADR-0003-dream-cycle-ledger-signals-contamination-containment.md',
+        'docs/adrs/INDEX.md',
+        'docs/dream-cycle/2026-09-21-ledger-signals-report.md',
+        'docs/dream-cycle/LEDGER.md',
+        'packages/ledger/src/index.test.ts',
+        'packages/ledger/src/index.ts',
+        'scripts/dream-nightly.mjs',
+      ],
+      'dream/2026-10-11-ledger-signals': [
+        '.github/workflows/automerge.yml',
+        'docs/dream-cycle/2026-10-11-ledger-signals-report.md',
+        'docs/dream-cycle/LEDGER.md',
+        'packages/compile/src/automergeWorkflowTriggers.test.ts',
+        'packages/compile/src/automergeWorkflowTriggers.ts',
+      ],
+      'dream/2026-10-13-security-adversarial': [
+        'docs/dream-cycle/2026-10-13-security-adversarial-report.md',
+        'docs/dream-cycle/LEDGER.md',
+        'package-lock.json',
+      ],
+      'dream/2026-10-18-security-adversarial': [
+        '.github/workflows/automerge.yml',
+        'docs/dream-cycle/2026-10-18-security-adversarial-report.md',
+        'docs/dream-cycle/LEDGER.md',
+        'scripts/check-protected-paths.mjs',
+        'scripts/check-protected-paths.test.mjs',
+        'vitest.config.ts',
+      ],
+      // Clean, unprotected sample from the same real backlog.
+      'dream/2026-10-20-compiler-parity': [
+        'docs/dream-cycle/2026-10-20-compiler-parity-report.md',
+        'docs/dream-cycle/LEDGER.md',
+        'packages/compile/src/index.test.ts',
+        'packages/compile/src/index.ts',
+      ],
+    };
+    for (const [branch, files] of Object.entries(real)) {
+      const expected = branch.endsWith('compiler-parity') ? false : true;
+      expect(protectedPathBlocked(files).blocked, branch).toBe(expected);
+    }
   });
 });
