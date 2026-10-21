@@ -102,8 +102,12 @@ dream/2026-10-20-compiler-parity,true,0,4,0
 **Result (40 branches with an open PR, excluding the 1 stale extra):**
 40/40 merge-clean against current `main`. 4/40 touch a protected path (#33,
 #69, #73, #83 — all four for defensible reasons: CI/automerge-workflow fixes
-and a lockfile bump, i.e. correctly gated, not bugs). **37/40 (92.5%) are
-simultaneously conflict-free and outside the protected-path regex.**
+and a lockfile bump, i.e. correctly gated, not bugs). **36/40 (90%) are
+simultaneously conflict-free and outside the protected-path regex.** (An
+earlier draft of this report miscomputed this as 37/40 — 41 fetched branches
+minus 4 protected, without re-subtracting the 1 stale branch excluded from
+the 40-branch denominator. Caught by this PR's own independent critic
+subagent; corrected here. 40 − 4 = 36.)
 
 ### Inference (grade A — reproducible locally, not vendor/single-source)
 
@@ -161,10 +165,10 @@ independently reached by PR #33 and PR #83 on this exact pre-existing issue).
 
 ## Caveat (disclosed, not resolved tonight)
 
-"37/40 structurally eligible" means *conflict-free and not protected-path*,
+"36/40 structurally eligible" means *conflict-free and not protected-path*,
 nothing more. It does NOT mean each has current green required-status checks
 (the automerge guard also waits on those) — CI status per PR drifts over time
-and was spot-checked, not exhaustively re-verified, for all 37 tonight. It also
+and was spot-checked, not exhaustively re-verified, for all 36 tonight. It also
 does NOT account for pairwise conflicts between backlog branches themselves
 (PR #79 already showed real conflicts between #12/#16/#58) — merging PR *n*
 changes `main`, so PR *n+1*'s clean-merge status must be re-checked against the
@@ -173,7 +177,7 @@ single-tip snapshot.
 
 ## Recommendation
 
-See this PR's description. In short: a human can, today, mark any of the 37
+See this PR's description. In short: a human can, today, mark any of the 36
 listed-clean PRs ready-for-review and apply `automerge-safe`, one at a time,
 re-checking mergeability against the then-current `main` after each merge —
 exercising this repo's guarded auto-merge path for the first time since it was
