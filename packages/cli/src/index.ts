@@ -13,6 +13,7 @@ import {
   emptyLedger,
   learningSignals,
   verdictStats,
+  protectedPathBlocked,
   type LedgerRow,
 } from '@dream-machine/ledger';
 import { stamp, verify, verifySteps } from '@dream-machine/witness';
@@ -94,6 +95,7 @@ Commands:
   ledger signals  [--path LEDGER.md]                   Print STEP 1.1 learning signals
   ledger stats    [--path LEDGER.md]                   Verdict distribution
   ledger append   --path L --date .. --deep .. ...     Append one row
+  ledger merge-readiness --files-json '<json>'          Protected-path check per branch
   witness stamp   <report-file> <commit>               Compute the witness triple
   witness verify  <report-file> <commit> <witness>     Verify a claimed witness
   verify-entrypoint <label> --cmd "<command>"           Classify an evaluator entrypoint's liveness
@@ -224,7 +226,29 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
           sink.log(`appended row to ${path} (verdict=${row.verdict})`);
           return { code: 0, out: sink.out, err: sink.err };
         }
-        sink.error('ledger: expected sub-command verify|signals|stats|append');
+        if (sub === 'merge-readiness') {
+          const json = flags['files-json'] as string | undefined;
+          if (!json) {
+            sink.error(
+              `usage: dream-machine ledger merge-readiness --files-json '{"branch":["file1","file2"]}'`,
+            );
+            return { code: 1, out: sink.out, err: sink.err };
+          }
+          let input: Record<string, string[]>;
+          try {
+            input = JSON.parse(json);
+          } catch (e) {
+            sink.error(`merge-readiness: invalid --files-json — ${(e as Error).message}`);
+            return { code: 1, out: sink.out, err: sink.err };
+          }
+          const report = Object.entries(input).map(([branch, files]) => {
+            const r = protectedPathBlocked(files);
+            return { branch, protectedPath: r.blocked, matches: r.matches };
+          });
+          sink.log(JSON.stringify(report, null, 2));
+          return { code: 0, out: sink.out, err: sink.err };
+        }
+        sink.error('ledger: expected sub-command verify|signals|stats|append|merge-readiness');
         return { code: 1, out: sink.out, err: sink.err };
       }
 

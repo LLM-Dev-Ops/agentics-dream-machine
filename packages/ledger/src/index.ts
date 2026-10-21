@@ -255,3 +255,42 @@ export function verdictStats(rows: LedgerRow[]): Record<string, number> {
   }
   return stats;
 }
+
+// ---------------------------------------------------------------------------
+// Merge-readiness: a pure mirror of the live automerge guard's protected-path
+// check, so a candidate's changed-file list can be classified without
+// shelling out to the workflow file or to git.
+// ---------------------------------------------------------------------------
+
+/**
+ * Byte-for-byte mirror of the `protected` regex in `.github/workflows/automerge.yml`
+ * as committed at `2fba2550182d81b36423447221823e98e227482a` — the live gate between
+ * an `automerge-safe`-labeled PR and an unattended squash-merge. Case-sensitive and
+ * unanchored-per-alternative on purpose, because that is what is actually running
+ * today; this is deliberately NOT the fixed version proposed by (unmerged) PR #83,
+ * which closes known bypasses (nested manifests, alt lockfiles, case-sensitive
+ * keywords) via `scripts/check-protected-paths.mjs`. If #83 merges, this constant
+ * must be updated to match, or `protectedPathBlocked` will silently drift from the
+ * guard it claims to mirror — tracked in this file's test suite via a frozen
+ * baseline so that drift is caught, not assumed away.
+ */
+export const AUTOMERGE_PROTECTED_PATH_REGEX =
+  /^(\.github\/|packages\/[^/]+\/package\.json$|package\.json$|package-lock\.json$|.*\/safety|.*\/gate|.*(threshold|promotion|scorer).*|SECURITY\.md$)/;
+
+export interface ProtectedPathResult {
+  /** True iff at least one file would trip the live automerge guard's protected-path check. */
+  blocked: boolean;
+  /** The subset of input files that matched. */
+  matches: string[];
+}
+
+/**
+ * Classify a candidate's changed-file list against the live automerge guard's
+ * protected-path regex. Pure — takes caller-supplied file paths, does zero I/O,
+ * zero git, zero network. Mirrors how `conflictRisks`-style tooling in this repo
+ * is meant to work: real data in, a deterministic classification out.
+ */
+export function protectedPathBlocked(files: string[]): ProtectedPathResult {
+  const matches = files.filter((f) => AUTOMERGE_PROTECTED_PATH_REGEX.test(f));
+  return { blocked: matches.length > 0, matches };
+}
