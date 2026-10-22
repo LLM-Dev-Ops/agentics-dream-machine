@@ -8,8 +8,10 @@ import {
   learningSignals,
   verdictStats,
   escapeCell,
+  ciGateRecovery,
   LEDGER_COLUMNS,
   type LedgerRow,
+  type WorkflowRunSummary,
 } from './index.js';
 
 function row(over: Partial<LedgerRow> = {}): LedgerRow {
@@ -146,6 +148,69 @@ describe('learning signals', () => {
     for (let i = 0; i < 5; i++) l = appendRow(l, row({ evaluated: 'blocked', verdict: 'INCONCLUSIVE' }));
     const { rows } = parseLedger(l);
     expect(learningSignals(rows).blockedEvalStreak).toBe(true);
+  });
+});
+
+describe('ciGateRecovery', () => {
+  // Real `codeql.yml` run history for LLM-Dev-Ops/agentics-dream-machine,
+  // fetched live tonight (2026-10-22) via mcp__github__actions_list — run
+  // numbers 84-89 all `failure` (configuration error: "Code Security must be
+  // enabled for this repository to use code scanning"), 90-93 all `success`,
+  // with zero changes to codeql.yml across the transition. See
+  // docs/dream-cycle/2026-10-22-security-adversarial-report.md.
+  const realRuns: WorkflowRunSummary[] = [
+    { runNumber: 84, conclusion: 'failure' },
+    { runNumber: 85, conclusion: 'failure' },
+    { runNumber: 86, conclusion: 'failure' },
+    { runNumber: 87, conclusion: 'failure' },
+    { runNumber: 88, conclusion: 'failure' },
+    { runNumber: 89, conclusion: 'failure' },
+    { runNumber: 90, conclusion: 'success' },
+    { runNumber: 91, conclusion: 'success' },
+    { runNumber: 92, conclusion: 'success' },
+    { runNumber: 93, conclusion: 'success' },
+  ];
+
+  it('detects the real 2026-10-19 -> 2026-10-20 CodeQL recovery', () => {
+    const r = ciGateRecovery(realRuns);
+    expect(r.recovered).toBe(true);
+    expect(r.priorRedStreak).toBe(6);
+    expect(r.recoveredAtRunNumber).toBe(90);
+    expect(r.currentGreenStreak).toBe(4);
+  });
+
+  it('is order-independent (sorts by runNumber itself)', () => {
+    const shuffled = [...realRuns].reverse();
+    expect(ciGateRecovery(shuffled)).toEqual(ciGateRecovery(realRuns));
+  });
+
+  it('reports not-recovered while the gate is still red', () => {
+    const r = ciGateRecovery(realRuns.slice(0, 6)); // only the failing prefix
+    expect(r.recovered).toBe(false);
+    expect(r.priorRedStreak).toBe(0);
+    expect(r.recoveredAtRunNumber).toBeUndefined();
+    expect(r.currentGreenStreak).toBe(0);
+  });
+
+  it('does not claim a recovery when the whole window is already green', () => {
+    const allGreen: WorkflowRunSummary[] = [
+      { runNumber: 1, conclusion: 'success' },
+      { runNumber: 2, conclusion: 'success' },
+    ];
+    const r = ciGateRecovery(allGreen);
+    expect(r.recovered).toBe(false);
+    expect(r.currentGreenStreak).toBe(2);
+  });
+
+  it('treats non-success conclusions (cancelled, timed_out, null) as red', () => {
+    const r = ciGateRecovery([
+      { runNumber: 1, conclusion: 'cancelled' },
+      { runNumber: 2, conclusion: null },
+      { runNumber: 3, conclusion: 'success' },
+    ]);
+    expect(r.recovered).toBe(true);
+    expect(r.priorRedStreak).toBe(2);
+    expect(r.recoveredAtRunNumber).toBe(3);
   });
 });
 

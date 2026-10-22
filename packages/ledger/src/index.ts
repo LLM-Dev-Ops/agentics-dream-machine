@@ -246,6 +246,69 @@ export function learningSignals(rows: LedgerRow[], opts: SignalOptions = {}): Le
   };
 }
 
+// ---------------------------------------------------------------------------
+// CI-gate recovery — detects a red→green transition in a CI check's own run
+// history, so a night doesn't have to re-derive "is this still broken?" by
+// hand from raw Actions data every time (see 2026-10-22 report: CodeQL's
+// `analyze` job went 89 straight failures -> 4 straight successes between
+// run #89 and #90, with zero workflow-file change, and no prior night had a
+// mechanized way to notice that transition instead of re-asserting "still red").
+// ---------------------------------------------------------------------------
+
+export interface WorkflowRunSummary {
+  /** GitHub Actions run_number (monotonic per workflow, safe to sort on). */
+  runNumber: number;
+  /** 'success' | 'failure' | other conclusions GitHub reports; null = not yet concluded. */
+  conclusion: string | null;
+}
+
+export interface CiGateRecovery {
+  /** True iff the trailing streak is green and immediately preceded by a red run. */
+  recovered: boolean;
+  /** Length of the unbroken non-success streak immediately before the recovery (0 if none). */
+  priorRedStreak: number;
+  /** run_number of the first green run after that red streak (only set when recovered). */
+  recoveredAtRunNumber?: number;
+  /** Length of the unbroken trailing success streak, 0 if the latest run is not a success. */
+  currentGreenStreak: number;
+}
+
+/**
+ * Pure classifier over a workflow's own run history: did it just flip from a
+ * red streak to green? `runs` may be given in any order; duplicates of the
+ * same `runNumber` are not expected and are not de-duplicated here (callers
+ * pass one summary per run, as `mcp__github__actions_list` returns).
+ */
+export function ciGateRecovery(runs: WorkflowRunSummary[]): CiGateRecovery {
+  const sorted = [...runs].sort((a, b) => a.runNumber - b.runNumber);
+
+  let currentGreenStreak = 0;
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    if (sorted[i].conclusion === 'success') currentGreenStreak++;
+    else break;
+  }
+
+  // Either currently red, or the entire window is green (no red streak to
+  // recover from, so "recovered" isn't a meaningful claim within this window).
+  if (currentGreenStreak === 0 || currentGreenStreak === sorted.length) {
+    return { recovered: false, priorRedStreak: 0, currentGreenStreak };
+  }
+
+  const firstGreenIndex = sorted.length - currentGreenStreak;
+  let priorRedStreak = 0;
+  for (let i = firstGreenIndex - 1; i >= 0; i--) {
+    if (sorted[i].conclusion !== 'success') priorRedStreak++;
+    else break;
+  }
+
+  return {
+    recovered: priorRedStreak > 0,
+    priorRedStreak,
+    recoveredAtRunNumber: priorRedStreak > 0 ? sorted[firstGreenIndex].runNumber : undefined,
+    currentGreenStreak,
+  };
+}
+
 /** Verdict distribution over a ledger — used by the TUI and dashboard. */
 export function verdictStats(rows: LedgerRow[]): Record<string, number> {
   const stats: Record<string, number> = { ACCEPT: 0, REJECT: 0, INCONCLUSIVE: 0, other: 0 };
