@@ -13,7 +13,9 @@ import {
   emptyLedger,
   learningSignals,
   verdictStats,
+  ciGateRecovery,
   type LedgerRow,
+  type WorkflowRunSummary,
 } from '@dream-machine/ledger';
 import { stamp, verify, verifySteps } from '@dream-machine/witness';
 import { serializeRoutine, scheduleInstructions } from '@dream-machine/schedule';
@@ -94,6 +96,7 @@ Commands:
   ledger signals  [--path LEDGER.md]                   Print STEP 1.1 learning signals
   ledger stats    [--path LEDGER.md]                   Verdict distribution
   ledger append   --path L --date .. --deep .. ...     Append one row
+  ledger ci-recovery --runs-json '[...]'               Detect a red->green CI-gate transition
   witness stamp   <report-file> <commit>               Compute the witness triple
   witness verify  <report-file> <commit> <witness>     Verify a claimed witness
   verify-entrypoint <label> --cmd "<command>"           Classify an evaluator entrypoint's liveness
@@ -224,7 +227,23 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
           sink.log(`appended row to ${path} (verdict=${row.verdict})`);
           return { code: 0, out: sink.out, err: sink.err };
         }
-        sink.error('ledger: expected sub-command verify|signals|stats|append');
+        if (sub === 'ci-recovery') {
+          const raw = flags['runs-json'] as string | undefined;
+          if (!raw) {
+            sink.error('usage: dream-machine ledger ci-recovery --runs-json \'[{"runNumber":1,"conclusion":"success"},...]\'');
+            return { code: 1, out: sink.out, err: sink.err };
+          }
+          let runs: WorkflowRunSummary[];
+          try {
+            runs = JSON.parse(raw);
+          } catch (e) {
+            sink.error(`ledger ci-recovery: invalid --runs-json (${(e as Error).message})`);
+            return { code: 1, out: sink.out, err: sink.err };
+          }
+          sink.log(JSON.stringify(ciGateRecovery(runs), null, 2));
+          return { code: 0, out: sink.out, err: sink.err };
+        }
+        sink.error('ledger: expected sub-command verify|signals|stats|append|ci-recovery');
         return { code: 1, out: sink.out, err: sink.err };
       }
 

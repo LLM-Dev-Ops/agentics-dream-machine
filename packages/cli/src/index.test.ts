@@ -142,6 +142,29 @@ describe('ledger', () => {
     expect(r.code).toBe(0);
     expect(io.files['L.md']).toContain('| perf |');
   });
+  it('ci-recovery detects a red->green transition from --runs-json', async () => {
+    const runsJson = JSON.stringify([
+      { runNumber: 1, conclusion: 'failure' },
+      { runNumber: 2, conclusion: 'failure' },
+      { runNumber: 3, conclusion: 'success' },
+    ]);
+    const r = await run(['ledger', 'ci-recovery', '--runs-json', runsJson], mockIO());
+    expect(r.code).toBe(0);
+    const body = JSON.parse(r.out);
+    expect(body.recovered).toBe(true);
+    expect(body.priorRedStreak).toBe(2);
+    expect(body.recoveredAtRunNumber).toBe(3);
+  });
+  it('ci-recovery rejects malformed --runs-json', async () => {
+    const r = await run(['ledger', 'ci-recovery', '--runs-json', 'not json'], mockIO());
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('invalid --runs-json');
+  });
+  it('ci-recovery requires --runs-json', async () => {
+    const r = await run(['ledger', 'ci-recovery'], mockIO());
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('usage:');
+  });
 });
 
 describe('witness', () => {
