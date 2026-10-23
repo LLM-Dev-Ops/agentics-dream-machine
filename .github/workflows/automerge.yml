@@ -35,7 +35,12 @@ jobs:
           files=$(gh pr view "$PR" --json files --jq '.files[].path')
           echo "changed files:"; echo "$files"
           # Any match here disqualifies auto-merge.
-          protected='^(\.github/|packages/[^/]+/package\.json$|package\.json$|package-lock\.json$|.*/safety|.*/gate|.*(threshold|promotion|scorer).*|SECURITY\.md$)'
+          # dream.config.json sets evaluatorEntrypoints (commands a future
+          # nightly session executes verbatim, including via npx) and this
+          # very guard's own autoMerge/labels policy — a config-only PR that
+          # changed it would otherwise sail through unreviewed (found
+          # 2026-10-23, security-adversarial/supply-chain).
+          protected='^(\.github/|packages/[^/]+/package\.json$|package\.json$|package-lock\.json$|dream\.config\.json$|.*/safety|.*/gate|.*(threshold|promotion|scorer).*|SECURITY\.md$)'
           if echo "$files" | grep -qE "$protected"; then
             echo "blocked=true" >> "$GITHUB_OUTPUT"
             echo "::notice::Protected path touched — auto-merge disabled, human review required."
