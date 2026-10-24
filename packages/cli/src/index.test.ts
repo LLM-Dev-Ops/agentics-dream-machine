@@ -297,4 +297,35 @@ describe('tui', () => {
     const frame = renderDashboard(md, { noColor: true });
     expect(frame).toContain('zero merges');
   });
+
+  it('truncating a colorized signal footer never splits an ANSI escape, and leaves it reset', () => {
+    // Enough simultaneous signals (zero-merge + blocked-eval + duplicate-direction) to force
+    // the footer past the 76-col budget while colorized, which is the only path that exercises
+    // pad()'s truncation branch — every other existing tui test here renders with noColor:true.
+    let md = emptyLedger();
+    for (let i = 0; i < 3; i++) md = appendRow(md, sampleRow({ finding: 'foo bar baz qux quux corge', evaluated: 'yes' }));
+    for (let i = 0; i < 4; i++) md = appendRow(md, sampleRow({ finding: `other finding ${i}`, evaluated: 'yes' }));
+    for (let i = 0; i < 3; i++) md = appendRow(md, sampleRow({ finding: `blocked finding ${i}`, evaluated: 'blocked' }));
+    const frame = renderDashboard(md); // color ON (default)
+
+    const footerLine = frame.split('\n').find((l) => l.includes('zero merges'));
+    expect(footerLine).toBeDefined();
+    // Every raw ANSI CSI opener ("\x1b[") must be followed by a complete, well-formed
+    // sequence ("...m") before the string ends or another opener begins — i.e. none were
+    // cut mid-sequence by a naive substring slice.
+    const fragments = footerLine!.split('\x1b[').slice(1);
+    for (const frag of fragments) expect(frag).toMatch(/^[0-9;]*m/);
+    // The visible (ANSI-stripped) width must stay within the box budget (78-col interior +
+    // the 2 border chars) — truncation must count visible characters, not raw bytes (which
+    // undercounts budget when colorized).
+    const visible = footerLine!.replace(/\x1b\[[0-9;]*m/g, '');
+    expect(visible.length).toBeLessThanOrEqual(80);
+  });
+
+  it('truncation on a plain (no-color) string adds no ANSI bytes', () => {
+    const plain = 'x'.repeat(100);
+    const frame = renderDashboard(emptyLedger(), { noColor: true, repo: plain });
+    const titleLine = frame.split('\n')[1];
+    expect(titleLine).not.toContain('\x1b[');
+  });
 });

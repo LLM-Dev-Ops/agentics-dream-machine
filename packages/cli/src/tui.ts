@@ -25,9 +25,37 @@ function verdictColor(v: string): string {
   return C.gray;
 }
 
+const ANSI = /\x1b\[[0-9;]*m/;
+
+/**
+ * Truncate to `maxVisible` visible characters, passing any embedded ANSI
+ * escapes through untouched (never splitting one mid-sequence). Only emits a
+ * trailing reset if an escape was actually consumed, so plain/no-color input
+ * stays byte-for-byte plain.
+ */
+function truncateVisible(s: string, maxVisible: number): string {
+  let visible = 0;
+  let i = 0;
+  let out = '';
+  let sawAnsi = false;
+  while (i < s.length && visible < maxVisible) {
+    const m = ANSI.exec(s.slice(i));
+    if (m && m.index === 0) {
+      out += m[0];
+      i += m[0].length;
+      sawAnsi = true;
+      continue;
+    }
+    out += s[i];
+    visible++;
+    i++;
+  }
+  return out + '…' + (sawAnsi ? '\x1b[0m' : '');
+}
+
 function pad(s: string, n: number): string {
   const clean = s.replace(/\x1b\[[0-9;]*m/g, '');
-  if (clean.length > n) return s.slice(0, Math.max(0, n - 1)) + '…';
+  if (clean.length > n) return truncateVisible(s, Math.max(0, n - 1));
   return s + ' '.repeat(n - clean.length);
 }
 
