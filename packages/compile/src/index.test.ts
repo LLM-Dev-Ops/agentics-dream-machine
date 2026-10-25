@@ -70,11 +70,11 @@ describe('compile', () => {
       expect(prompt).toContain(`DEEP=${s.deep}`);
       expect(prompt).toContain((s.scan as string[]).join(','));
     }
-    expect(prompt).toContain('SLOT=$(( DAYINT % 5 ))');
+    expect(prompt).toContain('SLOT=$(( EPOCHDAY % 5 ))');
   });
 
   it('injects bonus moduli', () => {
-    expect(prompt).toContain('DAYINT % 25 == 0');
+    expect(prompt).toContain('EPOCHDAY % 25 == 0');
     expect(prompt).toContain('vertical-packs');
   });
 

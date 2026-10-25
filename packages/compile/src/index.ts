@@ -106,7 +106,7 @@ function step0Context(slots: DreamConfig['slots'], bonus?: Record<string, string
   const bonusLines = bonus
     ? '\n\nBonus deep dives:\n\n```text\n' +
       Object.entries(bonus)
-        .map(([mod, surface]) => `DAYINT % ${mod} == 0  → add ${surface}`)
+        .map(([mod, surface]) => `EPOCHDAY % ${mod} == 0  → add ${surface}`)
         .join('\n') +
       '\n```'
     : '';
@@ -115,9 +115,16 @@ function step0Context(slots: DreamConfig['slots'], bonus?: Record<string, string
 \`\`\`bash
 DATE=$(date -u +%Y-%m-%d)
 DAYINT=$(date -u +%Y%m%d)
-SLOT=$(( DAYINT % ${slots.length} ))
+EPOCHDAY=$(( $(date -u +%s) / 86400 ))
+SLOT=$(( EPOCHDAY % ${slots.length} ))
 SESSION_COMMIT=$(git rev-parse HEAD)
 \`\`\`
+
+\`DAYINT\` (\`YYYYMMDD\`) is kept only for display/filenames. The rotation and
+bonus triggers key off \`EPOCHDAY\` (days since the Unix epoch), a strictly
+monotonic counter — \`DAYINT % N\` for an \`N\` sharing a factor with 100 (e.g.
+5, 25, 75) collapses to \`day-of-month % N\`, which repeats or skips a slot at
+most calendar-month boundaries instead of advancing one slot per night.
 
 Slot map:
 
