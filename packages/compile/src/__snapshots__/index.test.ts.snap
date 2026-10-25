@@ -45,9 +45,16 @@ Repo-specific disciplines that bind every quantitative claim tonight:
 \`\`\`bash
 DATE=$(date -u +%Y-%m-%d)
 DAYINT=$(date -u +%Y%m%d)
-SLOT=$(( DAYINT % 5 ))
+EPOCHDAY=$(( $(date -u +%s) / 86400 ))
+SLOT=$(( EPOCHDAY % 5 ))
 SESSION_COMMIT=$(git rev-parse HEAD)
 \`\`\`
+
+\`DAYINT\` (\`YYYYMMDD\`) is kept only for display/filenames. The rotation and
+bonus triggers key off \`EPOCHDAY\` (days since the Unix epoch), a strictly
+monotonic counter — \`DAYINT % N\` for an \`N\` sharing a factor with 100 (e.g.
+5, 25, 75) collapses to \`day-of-month % N\`, which repeats or skips a slot at
+most calendar-month boundaries instead of advancing one slot per night.
 
 Slot map:
 
@@ -71,8 +78,8 @@ Slot map:
 Bonus deep dives:
 
 \`\`\`text
-DAYINT % 25 == 0  → add vertical-packs
-DAYINT % 75 == 0  → add meta-proxy
+EPOCHDAY % 25 == 0  → add vertical-packs
+EPOCHDAY % 75 == 0  → add meta-proxy
 \`\`\`
 
 Print \`Tonight: DATE / DEEP / SCAN / SLOT / COMMIT\`. Expose the workflow via
