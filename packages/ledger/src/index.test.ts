@@ -147,6 +147,77 @@ describe('learning signals', () => {
     const { rows } = parseLedger(l);
     expect(learningSignals(rows).blockedEvalStreak).toBe(true);
   });
+
+  it('surfaceStreak is null below the default threshold of 3', () => {
+    let l = emptyLedger();
+    l = appendRow(l, row({ deep: 'ledger-signals', finding: 'a' }));
+    l = appendRow(l, row({ deep: 'ledger-signals', finding: 'b' }));
+    const { rows } = parseLedger(l);
+    expect(learningSignals(rows).surfaceStreak).toBeNull();
+  });
+
+  it('surfaceStreak fires at exactly the threshold and counts the full trailing run', () => {
+    let l = emptyLedger();
+    l = appendRow(l, row({ deep: 'compiler-parity', finding: 'unrelated earlier night' }));
+    for (let i = 0; i < 4; i++) l = appendRow(l, row({ deep: 'ledger-signals', finding: `distinct wording ${i}` }));
+    const { rows } = parseLedger(l);
+    expect(learningSignals(rows).surfaceStreak).toEqual({ deep: 'ledger-signals', count: 4 });
+  });
+
+  it('surfaceStreak only counts the trailing run — an interruption resets it', () => {
+    let l = emptyLedger();
+    for (let i = 0; i < 5; i++) l = appendRow(l, row({ deep: 'ledger-signals' }));
+    l = appendRow(l, row({ deep: 'security-adversarial' }));
+    l = appendRow(l, row({ deep: 'developer-experience' }));
+    const { rows } = parseLedger(l);
+    expect(learningSignals(rows).surfaceStreak).toBeNull();
+  });
+
+  it('surfaceStreak threshold is configurable via SignalOptions', () => {
+    let l = emptyLedger();
+    for (let i = 0; i < 2; i++) l = appendRow(l, row({ deep: 'ledger-signals' }));
+    const { rows } = parseLedger(l);
+    expect(learningSignals(rows, { surfaceStreakThreshold: 2 }).surfaceStreak).toEqual({
+      deep: 'ledger-signals',
+      count: 2,
+    });
+  });
+
+  it('REAL DATA: duplicateDirections misses this repo\'s own 7-night ledger-signals history, surfaceStreak catches it', () => {
+    // The real `finding` text of every issue/PR on LLM-Dev-Ops/agentics-dream-machine
+    // explicitly tagged "ledger-signals:" in its title, read live from GitHub
+    // tonight (2026-10-26), in order: #15/16, #32/33, #42/43 (then a real
+    // 2026-10-01 self-rotation away from this surface, per this same STEP 1.1
+    // rule, on issue/PR #52/53 — not reproduced here since it is a different
+    // `deep` value), then #58/59, #68/69, #78/79, #88/89. Each finding is
+    // worded differently enough that no 6-word-normalized prefix repeats
+    // >= 3x, so duplicateDirections (finding-text based) stays empty across
+    // the whole sequence — even though the same `deep` surface repeats 7x.
+    const realNights: Array<{ deep: string; finding: string }> = [
+      { deep: 'ledger-signals', finding: "main's LEDGER.md is 3 nights stale behind open PRs #12/#14" },
+      { deep: 'ledger-signals', finding: 'contamination traced, quarantined, CI gate added' },
+      {
+        deep: 'ledger-signals',
+        finding: '17 open PRs / 0 merged in 18 days reconfirmed; STEP 1.1 signals blind to unmerged backlog (self-demonstrated)',
+      },
+      { deep: 'ledger-signals', finding: 'backlogSaturated signal (issue #42 rec #5, plumbing only)' },
+      { deep: 'ledger-signals', finding: 'automerge guard never re-fires on ready_for_review (stuck-forever gap)' },
+      {
+        deep: 'ledger-signals',
+        finding: 'real git-merge conflicts confirmed between PR #12/#16/#58 + conflictRisks() tool',
+      },
+      {
+        deep: 'ledger-signals',
+        finding: 'real git merge-tree audit of all 40 open dream-cycle PRs: 36/40 (90%) eligible + merge-readiness CLI',
+      },
+    ];
+    let l = emptyLedger();
+    for (const n of realNights) l = appendRow(l, row(n));
+    const { rows } = parseLedger(l);
+    const s = learningSignals(rows);
+    expect(s.duplicateDirections).toEqual([]); // the existing, unmodified signal: blind to this.
+    expect(s.surfaceStreak).toEqual({ deep: 'ledger-signals', count: realNights.length }); // the new one: not blind.
+  });
 });
 
 describe('verdictStats', () => {

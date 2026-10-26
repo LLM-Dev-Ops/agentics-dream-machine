@@ -185,6 +185,30 @@ export interface LearningSignals {
   zeroMergeStreak: boolean;
   /** A finding substring seen in >= 3 prior rows → duplicate direction, rotate. */
   duplicateDirections: string[];
+  /**
+   * The same `deep` surface appearing >= `surfaceStreakThreshold` times in the
+   * trailing window, counted on the `deep` column itself — independent of how
+   * differently each night's `finding` text is worded. `duplicateDirections`
+   * (above) normalizes `finding` to its first 6 words and misses this: of
+   * this repo's real `ledger-signals`-tagged dream-cycle nights (issues/PRs
+   * #15/16, #32/33, #42/43 — then a 2026-10-01 self-rotation away from this
+   * surface per this same STEP 1.1 rule — then #58/59, #68/69, #78/79,
+   * #88/89), each finding is worded differently enough that no 6-word
+   * prefix ever repeated 3x, so `duplicateDirections` stayed `[]` across the
+   * whole sequence (reproduced in this module's own tests, using the real
+   * finding text). `surfaceStreak` catches the surface-level repetition
+   * `duplicateDirections` structurally cannot — for whatever rows it is
+   * given. It does NOT by itself fix the separate, larger, already-diagnosed
+   * gap (issues #42/#78) that `learningSignals()` only ever sees the rows
+   * physically appended to `LEDGER.md` on `main`, which has gained exactly
+   * one new row since 2026-09-08 because no candidate PR has merged — so in
+   * this repo tonight, `surfaceStreak` is fed the same stale 9-row input as
+   * every other STEP 1.1 signal, not the real unmerged-branch history. That
+   * gap requires reading live GitHub state directly (as #78/#79's
+   * `conflictRisks()` and #88/89's merge-readiness tool already do), not a
+   * `learningSignals()` change.
+   */
+  surfaceStreak: { deep: string; count: number } | null;
   /** >= 3 consecutive gist self-scores < 5 → reduce to a single deep surface. */
   lowScoreStreak: boolean;
   /** Long run of evaluated=blocked → bias to no-model-call candidates. */
@@ -200,6 +224,8 @@ export interface SignalOptions {
   recentScores?: number[];
   /** Which PR numbers actually merged (so we can detect the zero-merge streak). */
   mergedPrNumbers?: Set<string>;
+  /** Minimum trailing same-`deep` run length that counts as a surface streak. */
+  surfaceStreakThreshold?: number;
 }
 
 function prNumber(pr: string): string | null {
@@ -207,10 +233,27 @@ function prNumber(pr: string): string | null {
   return m ? m[1] : null;
 }
 
+/**
+ * Length of the trailing run of rows sharing the most recent row's `deep`
+ * value, counted back from the end of the ledger — independent of `finding`
+ * wording. Returns `null` below `threshold` (no streak worth flagging).
+ */
+function trailingSurfaceStreak(
+  rows: LedgerRow[],
+  threshold: number,
+): { deep: string; count: number } | null {
+  if (rows.length === 0) return null;
+  const deep = rows[rows.length - 1].deep;
+  let count = 0;
+  for (let i = rows.length - 1; i >= 0 && rows[i].deep === deep; i--) count++;
+  return count >= threshold ? { deep, count } : null;
+}
+
 /** Compute the STEP 1.1 learning signals from parsed rows. */
 export function learningSignals(rows: LedgerRow[], opts: SignalOptions = {}): LearningSignals {
   const window = opts.window ?? 14;
   const recent = rows.slice(-window);
+  const surfaceStreak = trailingSurfaceStreak(rows, opts.surfaceStreakThreshold ?? 3);
 
   // Zero-merge streak: no PR in the window is known-merged.
   const merged = opts.mergedPrNumbers;
@@ -240,6 +283,7 @@ export function learningSignals(rows: LedgerRow[], opts: SignalOptions = {}): Le
   return {
     zeroMergeStreak,
     duplicateDirections,
+    surfaceStreak,
     lowScoreStreak,
     blockedEvalStreak,
     nightsConsidered: recent.length,
