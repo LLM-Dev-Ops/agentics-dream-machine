@@ -1,0 +1,11 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`golden-snapshot: ledger stats JSON shape > is stable for a fixed ledger fixture 1`] = `
+"{
+  "ACCEPT": 1,
+  "REJECT": 1,
+  "INCONCLUSIVE": 1,
+  "other": 1
+}
+"
+`;
