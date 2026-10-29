@@ -278,6 +278,30 @@ describe('verify-entrypoints', () => {
   });
 });
 
+// PR #57 (2026-10-05) added golden-snapshot coverage for `ledger signals`'s
+// JSON and `verify-entrypoints`'s per-line output, closing PR #14's deferred
+// next-step #1, and explicitly deferred step #2: `ledger stats`'s JSON has
+// the identical gap (same `JSON.stringify(..., null, 2)` shape, same
+// substring-only coverage above at line ~129). `verdictStats()` also backs
+// the TUI's "nights N accept/reject/inconclusive" header line, so a silent
+// shape change here would drift both the `ledger stats` CLI contract and the
+// dashboard a human reads every night. This closes that deferred step.
+describe('golden-snapshot: ledger stats JSON shape', () => {
+  it('is stable for a fixed ledger fixture', async () => {
+    let md = emptyLedger();
+    const fixture: Array<Partial<LedgerRow>> = [
+      { date: '2026-08-13', verdict: 'ACCEPT' },
+      { date: '2026-08-14', verdict: 'REJECT' },
+      { date: '2026-08-15', verdict: 'INCONCLUSIVE' },
+      { date: '2026-08-16', verdict: 'MAYBE' }, // falls into the "other" bucket
+    ];
+    for (const row of fixture) md = appendRow(md, sampleRow(row));
+    const r = await run(['ledger', 'stats', '--path', 'L.md'], mockIO({ 'L.md': md }));
+    expect(r.code).toBe(0);
+    expect(r.out).toMatchSnapshot();
+  });
+});
+
 describe('tui', () => {
   it('renders a dashboard from a ledger', async () => {
     const md = appendRow(emptyLedger(), sampleRow());
