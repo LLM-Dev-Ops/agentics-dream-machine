@@ -99,7 +99,48 @@ export function validateConfig(config: Partial<DreamConfig>): ValidationResult {
       if (!/^\d+$/.test(k)) errors.push(`bonusModuli key "${k}" must be an integer`);
     }
   }
+  if (config.autoMerge !== undefined && typeof config.autoMerge !== 'boolean') {
+    errors.push(`autoMerge must be a boolean, got ${typeof config.autoMerge}`);
+  }
+  if (config.labels !== undefined && !isStringArray(config.labels)) {
+    errors.push('labels must be an array of strings');
+  }
+  if (config.competitors !== undefined && !isStringArray(config.competitors)) {
+    errors.push('competitors must be an array of strings');
+  }
+  if (config.extraDisciplines !== undefined && !isStringArray(config.extraDisciplines)) {
+    errors.push('extraDisciplines must be an array of strings');
+  }
+  if (config.branchPrefix !== undefined && typeof config.branchPrefix !== 'string') {
+    errors.push(`branchPrefix must be a string, got ${typeof config.branchPrefix}`);
+  }
+  if (config.ledgerPath !== undefined && typeof config.ledgerPath !== 'string') {
+    errors.push(`ledgerPath must be a string, got ${typeof config.ledgerPath}`);
+  }
+  if (config.evaluatorEntrypoints !== undefined) {
+    if (typeof config.evaluatorEntrypoints !== 'object' || config.evaluatorEntrypoints === null || Array.isArray(config.evaluatorEntrypoints)) {
+      errors.push('evaluatorEntrypoints must be an object');
+    } else {
+      for (const [k, v] of Object.entries(config.evaluatorEntrypoints)) {
+        if (v !== undefined && typeof v !== 'string') {
+          errors.push(`evaluatorEntrypoints.${k} must be a string, got ${typeof v}`);
+        }
+      }
+    }
+  }
+  if (config.adrConvention !== undefined) {
+    const c = config.adrConvention;
+    const isKnownString = c === '3-digit' || c === '4-digit';
+    const isPadObject = typeof c === 'object' && c !== null && typeof (c as { pad?: unknown }).pad === 'number' && typeof (c as { dir?: unknown }).dir === 'string';
+    if (!isKnownString && !isPadObject) {
+      errors.push('adrConvention must be "3-digit", "4-digit", or { pad: number, dir: string }');
+    }
+  }
   return { ok: errors.length === 0, errors, warnings };
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((v) => typeof v === 'string');
 }
 
 /** Fill defaults over a partial config after validation passes. */
