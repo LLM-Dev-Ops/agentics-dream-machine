@@ -142,6 +142,26 @@ describe('ledger', () => {
     expect(r.code).toBe(0);
     expect(io.files['L.md']).toContain('| perf |');
   });
+  it('append refuses a compound/invalid verdict and leaves the file untouched', async () => {
+    const io = mockIO({ 'L.md': ledgerMd });
+    const r = await run(
+      ['ledger', 'append', '--path', 'L.md', '--deep', 'x', '--finding', 'x', '--verdict', 'ACCEPT / INCONCLUSIVE'],
+      io,
+    );
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('verdict');
+    expect(io.files['L.md']).toBe(ledgerMd);
+  });
+  it('append refuses an invalid evaluated value and leaves the file untouched', async () => {
+    const io = mockIO({ 'L.md': ledgerMd });
+    const r = await run(
+      ['ledger', 'append', '--path', 'L.md', '--deep', 'x', '--finding', 'x', '--evaluated', 'partial'],
+      io,
+    );
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('evaluated');
+    expect(io.files['L.md']).toBe(ledgerMd);
+  });
 });
 
 describe('witness', () => {

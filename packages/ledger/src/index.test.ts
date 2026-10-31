@@ -5,6 +5,7 @@ import {
   appendRow,
   renderRow,
   verifyLedger,
+  validateRow,
   learningSignals,
   verdictStats,
   escapeCell,
@@ -106,6 +107,25 @@ describe('verifyLedger', () => {
     const r = verifyLedger('just some text, no table');
     expect(r.ok).toBe(false);
     expect(r.errors.join()).toMatch(/header/);
+  });
+});
+
+describe('validateRow', () => {
+  it('accepts a well-formed row', () => {
+    expect(validateRow(row())).toEqual([]);
+  });
+
+  it('rejects a compound verdict (the rows 2-6 corruption pattern)', () => {
+    const errors = validateRow(row({ verdict: 'ACCEPT / INCONCLUSIVE', evaluated: 'partial' }));
+    expect(errors.join()).toMatch(/verdict/);
+    expect(errors.join()).toMatch(/evaluated/);
+  });
+
+  it('is what verifyLedger uses under the hood, so the two never drift', () => {
+    const bad = row({ verdict: 'MAYBE' });
+    const l = appendRow(emptyLedger(), bad);
+    const r = verifyLedger(l);
+    expect(r.errors[0]).toContain(validateRow(bad)[0]);
   });
 });
 

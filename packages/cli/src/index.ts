@@ -13,6 +13,7 @@ import {
   emptyLedger,
   learningSignals,
   verdictStats,
+  validateRow,
   type LedgerRow,
 } from '@dream-machine/ledger';
 import { stamp, verify, verifySteps } from '@dream-machine/witness';
@@ -219,6 +220,12 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
             witness: (flags.witness as string) || '',
             priorFates: (flags.priorFates as string) || '',
           };
+          const rowErrors = validateRow(row);
+          if (rowErrors.length) {
+            sink.error(`✗ refusing to append an invalid row (${rowErrors.length} error(s)):`);
+            rowErrors.forEach((e) => sink.error(`  - ${e}`));
+            return { code: 1, out: sink.out, err: sink.err };
+          }
           const next = appendRow(md, row);
           await io.writeFile(path, next);
           sink.log(`appended row to ${path} (verdict=${row.verdict})`);

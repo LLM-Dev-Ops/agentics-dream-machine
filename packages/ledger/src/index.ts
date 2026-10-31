@@ -145,14 +145,35 @@ export function appendRow(markdown: string, row: LedgerRow): string {
   return `${base}\n${renderRow(row)}\n`;
 }
 
-const VERDICTS: readonly string[] = ['ACCEPT', 'REJECT', 'INCONCLUSIVE'];
-const EVALS: readonly string[] = ['yes', 'no', 'blocked'];
+export const VERDICTS: readonly string[] = ['ACCEPT', 'REJECT', 'INCONCLUSIVE'];
+export const EVALS: readonly string[] = ['yes', 'no', 'blocked'];
 
 export interface VerifyResult {
   ok: boolean;
   errors: string[];
   warnings: string[];
   rowCount: number;
+}
+
+/**
+ * Validate a single row against the schema (verdict/evaluated enums, date
+ * shape). Shared by `verifyLedger` (post-hoc, many rows) and `appendRow`
+ * callers that want to reject a bad row before it ever reaches the file —
+ * rows 2-6 of this repo's own LEDGER.md got "ACCEPT / REJECT" / "partial"
+ * written straight through because nothing validated at append time.
+ */
+export function validateRow(row: LedgerRow): string[] {
+  const errors: string[] = [];
+  if (row.verdict && !VERDICTS.includes(row.verdict)) {
+    errors.push(`verdict "${row.verdict}" not in ${VERDICTS.join('|')}`);
+  }
+  if (row.evaluated && !EVALS.includes(row.evaluated)) {
+    errors.push(`evaluated "${row.evaluated}" not in ${EVALS.join('|')}`);
+  }
+  if (row.date && !/^\d{4}-\d{2}-\d{2}$/.test(row.date)) {
+    errors.push(`date "${row.date}" is not YYYY-MM-DD`);
+  }
+  return errors;
 }
 
 /** Structurally verify a ledger: header present, verdicts/evaluated in range. */
@@ -163,15 +184,7 @@ export function verifyLedger(markdown: string): VerifyResult {
     errors.push('ledger is missing the Date header row');
   }
   rows.forEach((r, i) => {
-    if (r.verdict && !VERDICTS.includes(r.verdict)) {
-      errors.push(`row ${i + 1}: verdict "${r.verdict}" not in ${VERDICTS.join('|')}`);
-    }
-    if (r.evaluated && !EVALS.includes(r.evaluated)) {
-      errors.push(`row ${i + 1}: evaluated "${r.evaluated}" not in ${EVALS.join('|')}`);
-    }
-    if (r.date && !/^\d{4}-\d{2}-\d{2}$/.test(r.date)) {
-      errors.push(`row ${i + 1}: date "${r.date}" is not YYYY-MM-DD`);
-    }
+    for (const e of validateRow(r)) errors.push(`row ${i + 1}: ${e}`);
   });
   return { ok: errors.length === 0, errors, warnings, rowCount: rows.length };
 }
