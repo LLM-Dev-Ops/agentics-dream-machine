@@ -109,7 +109,7 @@ measured this way tonight), and `{ repoIndependent: false, reason: '...not
 measured...' }` for every other input, including unknown strings — the
 honest default, never asserting repo-*dependence* without measuring that
 too. `packages/cli/src/darwin-sandbox.test.ts` (new, 4 tests). 2 files,
-+71 lines, 0 deletions, one conceptual change, well under the 300-line
++87 lines (60+27, `git diff --numstat` confirmed), 0 deletions, one conceptual change, well under the 300-line
 target. No existing file touched — zero merge-conflict surface with any of
 the 57 open PRs.
 
@@ -231,6 +231,20 @@ actually test this way — the function has exactly one `if` branch, for the
 one string literally measured. Checked for duplication against #18/#81/#101
 by reading each in full (see Ledger Check) — confirmed none ran the
 nonexistent-path comparison. CLEAR.
+
+**Independent critic** (fresh general-purpose subagent, given only the diff
+and the claim, instructed to re-derive everything itself): re-ran `npm test`
+on both `main@2fba255` and this branch in separate worktrees, independently
+confirmed 106/106 → 110/110 with the same 4 added tests; confirmed
+`classifySandboxDiagnosticity`'s single `if` branch does not claim anything
+about `real`/`agent`/`llm-agent`; confirmed zero file-level or claim-level
+overlap with #18/#81/#101; confirmed no `.metaharness/` or stray artifact in
+the diff. **One factual error found and corrected before this report was
+finalized**: the Candidate section originally claimed "+71 lines"; `git
+diff --numstat` actually shows 87 (60+27) — a stale figure from an earlier
+draft of the two files, not a reward-hacking attempt (it understated, not
+overstated, the change's size). Fixed above. No other finding. **Verdict:
+CLEAR.**
 
 ## Security Review
 
