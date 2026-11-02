@@ -18,7 +18,7 @@ import {
 import { stamp, verify, verifySteps } from '@dream-machine/witness';
 import { serializeRoutine, scheduleInstructions } from '@dream-machine/schedule';
 import { renderDashboard } from './tui.js';
-import { classifyEntrypointResult, classifyConfiguredEntrypoints, type ExecResult } from './entrypoint.js';
+import { classifyEntrypointResultStrict, classifyConfiguredEntrypoints, type ExecResult } from './entrypoint.js';
 
 export const VERSION = '0.1.1';
 
@@ -291,7 +291,7 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
           return { code: 1, out: sink.out, err: sink.err };
         }
         const result = await io.exec(cmd);
-        const check = classifyEntrypointResult(result);
+        const check = classifyEntrypointResultStrict(result);
         sink.log(`${label}: ${check.verdict} (exit ${check.code}) — ${check.reason}`);
         const code = check.verdict === 'live' ? 0 : check.verdict === 'blocked' ? 1 : 2;
         return { code, out: sink.out, err: sink.err };

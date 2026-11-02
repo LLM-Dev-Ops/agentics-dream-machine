@@ -220,6 +220,22 @@ describe('verify-entrypoint', () => {
     expect(r.code).toBe(1);
     expect(r.err).toContain('no exec()');
   });
+
+  it('reports suspicious-misconfigured, not live, for the unfixed darwin entrypoint (missing positional)', async () => {
+    // Real stdout captured 2026-11-02 running `npx @metaharness/darwin evolve --sandbox real`
+    // (this repo's then-configured darwin entrypoint, missing its required `<repo>` positional)
+    // from repo root: Darwin's CLI swallows `--sandbox` as the positional and writes artifacts
+    // under `./--sandbox/.metaharness` while still exiting 0 with a plausible leaderboard.
+    const io = mockIOWithExec(async () => ({
+      code: 0,
+      stdout: 'Darwin Mode — leaderboard\n...\nArtifacts: /repo/--sandbox/.metaharness\n',
+      stderr: '',
+    }));
+    const r = await run(['verify-entrypoint', 'darwin', '--cmd', 'npx @metaharness/darwin evolve --sandbox real'], io);
+    expect(r.code).toBe(2);
+    expect(r.out).toContain('darwin: suspicious-misconfigured');
+    expect(r.out).toContain('--sandbox');
+  });
 });
 
 describe('verify-entrypoints', () => {
