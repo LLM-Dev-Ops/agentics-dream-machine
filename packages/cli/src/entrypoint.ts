@@ -21,7 +21,7 @@ export interface ExecResult {
   stderr: string;
 }
 
-export type EntrypointVerdict = 'live' | 'suspicious-silent' | 'blocked';
+export type EntrypointVerdict = 'live' | 'suspicious-silent' | 'suspicious-misconfigured' | 'blocked';
 
 export interface EntrypointCheck {
   verdict: EntrypointVerdict;
@@ -50,6 +50,50 @@ export function classifyEntrypointResult(r: ExecResult): EntrypointCheck {
   return { verdict: 'live', code: r.code, reason: 'produced output' };
 }
 
+/**
+ * Detects the failure mode reproduced 2026-11-02 (evaluation-adapters night,
+ * SCAN=darwin): this repo's configured `darwin` entrypoint
+ * (`npx @metaharness/darwin evolve --sandbox real`) omits the required
+ * positional `<repo>` argument. Darwin's CLI silently swallows the next flag
+ * token (e.g. `--sandbox`) as that positional instead of erroring, and still
+ * exits 0 with a complete, plausible-looking leaderboard — `live` to
+ * {@link classifyEntrypointResult}. The one place this leaks is Darwin's own
+ * `Artifacts: <path>` line, which is built from the (mis-)captured
+ * positional: when the reported artifacts directory is itself flag-shaped
+ * (starts with `-`), a positional argument was almost certainly swallowed by
+ * an adjacent flag. Pure string inspection — no knowledge of Darwin's
+ * internals beyond this one documented output line.
+ */
+export function detectSwallowedPositionalArtifact(stdout: string): string | undefined {
+  const m = stdout.match(/^Artifacts:\s*(\S.*)$/m);
+  if (!m) return undefined;
+  const dir = m[1].split(/[/\\]/).filter(Boolean).find((segment) => /^-/.test(segment));
+  return dir;
+}
+
+/**
+ * {@link classifyEntrypointResult}, with {@link detectSwallowedPositionalArtifact}
+ * layered on top of its `live` verdict. `classifyEntrypointResult` itself stays
+ * untouched (ADR-0002 pins its three-verdict contract) so every pre-existing
+ * caller/test of the bare function is unaffected; any call site that runs a
+ * real entrypoint and wants the 2026-11-02 swallowed-positional-argument check
+ * should use this wrapper instead.
+ */
+export function classifyEntrypointResultStrict(r: ExecResult): EntrypointCheck {
+  const check = classifyEntrypointResult(r);
+  if (check.verdict !== 'live') return check;
+  const swallowed = detectSwallowedPositionalArtifact(r.stdout);
+  if (!swallowed) return check;
+  return {
+    verdict: 'suspicious-misconfigured',
+    code: check.code,
+    reason:
+      `exit 0 with plausible output, but the reported artifacts path contains the flag-shaped ` +
+      `segment "${swallowed}" — a positional argument was likely swallowed by an adjacent flag; ` +
+      'do not record EVALUATED=yes from this result alone',
+  };
+}
+
 /** One configured evaluator entrypoint's classification, labelled with its config key + command. */
 export interface ConfiguredEntrypointResult extends EntrypointCheck {
   label: string;
@@ -72,7 +116,7 @@ export async function classifyConfiguredEntrypoints(
   for (const [label, cmd] of Object.entries(entrypoints)) {
     if (!cmd) continue;
     const r = await exec(cmd);
-    results.push({ label, cmd, ...classifyEntrypointResult(r) });
+    results.push({ label, cmd, ...classifyEntrypointResultStrict(r) });
   }
   return results;
 }
