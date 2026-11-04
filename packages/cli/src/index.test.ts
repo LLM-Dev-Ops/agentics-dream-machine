@@ -297,4 +297,17 @@ describe('tui', () => {
     const frame = renderDashboard(md, { noColor: true });
     expect(frame).toContain('zero merges');
   });
+  it('noColor strips every verdict color — regression guard for verdictColor()', () => {
+    let md = emptyLedger();
+    for (const verdict of ['ACCEPT', 'REJECT', 'INCONCLUSIVE', 'ANYTHING-ELSE']) {
+      md = appendRow(md, sampleRow({ pr: `#${verdict}`, verdict }));
+    }
+    const frame = renderDashboard(md, { noColor: true });
+    expect(frame).not.toMatch(/\x1b/);
+  });
+  it('colorized mode still emits a verdict color (no regression to the colored path)', () => {
+    const md = appendRow(emptyLedger(), sampleRow({ verdict: 'ACCEPT' }));
+    const frame = renderDashboard(md, { noColor: false });
+    expect(frame).toContain('\x1b[32m'); // green, for ACCEPT
+  });
 });
