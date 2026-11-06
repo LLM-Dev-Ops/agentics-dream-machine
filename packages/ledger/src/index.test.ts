@@ -5,6 +5,7 @@ import {
   appendRow,
   renderRow,
   verifyLedger,
+  validateRow,
   learningSignals,
   verdictStats,
   escapeCell,
@@ -106,6 +107,28 @@ describe('verifyLedger', () => {
     const r = verifyLedger('just some text, no table');
     expect(r.ok).toBe(false);
     expect(r.errors.join()).toMatch(/header/);
+  });
+});
+
+describe('validateRow', () => {
+  it('accepts a conforming row', () => {
+    expect(validateRow(row())).toEqual([]);
+  });
+
+  it('rejects a compound verdict before it ever reaches the ledger', () => {
+    const errors = validateRow(row({ verdict: 'ACCEPT / INCONCLUSIVE' }));
+    expect(errors.join()).toMatch(/verdict/);
+  });
+
+  it('rejects a non-enum evaluated value', () => {
+    const errors = validateRow(row({ evaluated: 'partial' }));
+    expect(errors.join()).toMatch(/evaluated/);
+  });
+
+  it('agrees with verifyLedger on a known-bad historical row shape', () => {
+    const bad = row({ verdict: 'ACCEPT / REJECT / INCONCLUSIVE', evaluated: 'partial' });
+    const l = appendRow(emptyLedger(), bad);
+    expect(validateRow(bad)).toHaveLength(verifyLedger(l).errors.length);
   });
 });
 

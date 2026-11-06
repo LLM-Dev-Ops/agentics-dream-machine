@@ -142,6 +142,37 @@ describe('ledger', () => {
     expect(r.code).toBe(0);
     expect(io.files['L.md']).toContain('| perf |');
   });
+
+  it('append refuses a non-conforming verdict and writes nothing', async () => {
+    const io = mockIO();
+    const r = await run(
+      ['ledger', 'append', '--path', 'L.md', '--deep', 'perf', '--finding', 'x', '--verdict', 'ACCEPT / REJECT'],
+      io,
+    );
+    expect(r.code).toBe(1);
+    expect(r.err).toMatch(/verdict/);
+    expect(io.files['L.md']).toBeUndefined();
+  });
+
+  it('append refuses a non-conforming evaluated value', async () => {
+    const io = mockIO();
+    const r = await run(
+      ['ledger', 'append', '--path', 'L.md', '--deep', 'perf', '--finding', 'x', '--evaluated', 'partial'],
+      io,
+    );
+    expect(r.code).toBe(1);
+    expect(r.err).toMatch(/evaluated/);
+  });
+
+  it('append --force bypasses validation', async () => {
+    const io = mockIO();
+    const r = await run(
+      ['ledger', 'append', '--path', 'L.md', '--deep', 'perf', '--finding', 'x', '--verdict', 'ACCEPT / REJECT', '--force'],
+      io,
+    );
+    expect(r.code).toBe(0);
+    expect(io.files['L.md']).toContain('ACCEPT / REJECT');
+  });
 });
 
 describe('witness', () => {
