@@ -10,7 +10,6 @@ import {
   parseLedger,
   verifyLedger,
   appendRow,
-  validateRow,
   emptyLedger,
   learningSignals,
   verdictStats,
@@ -94,7 +93,7 @@ Commands:
   ledger verify   [--path LEDGER.md]                   Structurally verify a ledger
   ledger signals  [--path LEDGER.md]                   Print STEP 1.1 learning signals
   ledger stats    [--path LEDGER.md]                   Verdict distribution
-  ledger append   --path L --date .. --deep .. ...     Append one row (validated; --force bypasses)
+  ledger append   --path L --date .. --deep .. ...     Append one row
   witness stamp   <report-file> <commit>               Compute the witness triple
   witness verify  <report-file> <commit> <witness>     Verify a claimed witness
   verify-entrypoint <label> --cmd "<command>"           Classify an evaluator entrypoint's liveness
@@ -220,13 +219,6 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
             witness: (flags.witness as string) || '',
             priorFates: (flags.priorFates as string) || '',
           };
-          const rowErrors = validateRow(row);
-          if (rowErrors.length && !flags.force) {
-            sink.error(`✗ refusing to append an invalid row (${rowErrors.length} error(s)):`);
-            rowErrors.forEach((e) => sink.error(`  - ${e}`));
-            sink.error('  pass --force to append anyway');
-            return { code: 1, out: sink.out, err: sink.err };
-          }
           const next = appendRow(md, row);
           await io.writeFile(path, next);
           sink.log(`appended row to ${path} (verdict=${row.verdict})`);

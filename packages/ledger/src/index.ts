@@ -148,25 +148,6 @@ export function appendRow(markdown: string, row: LedgerRow): string {
 const VERDICTS: readonly string[] = ['ACCEPT', 'REJECT', 'INCONCLUSIVE'];
 const EVALS: readonly string[] = ['yes', 'no', 'blocked'];
 
-/**
- * The same checks `verifyLedger` runs per-row, exposed standalone so a single
- * row can be validated BEFORE it is written (append-time gate), not just
- * discovered after the fact by a later `ledger verify` sweep.
- */
-export function validateRow(row: LedgerRow): string[] {
-  const errors: string[] = [];
-  if (row.verdict && !VERDICTS.includes(row.verdict)) {
-    errors.push(`verdict "${row.verdict}" not in ${VERDICTS.join('|')}`);
-  }
-  if (row.evaluated && !EVALS.includes(row.evaluated)) {
-    errors.push(`evaluated "${row.evaluated}" not in ${EVALS.join('|')}`);
-  }
-  if (row.date && !/^\d{4}-\d{2}-\d{2}$/.test(row.date)) {
-    errors.push(`date "${row.date}" is not YYYY-MM-DD`);
-  }
-  return errors;
-}
-
 export interface VerifyResult {
   ok: boolean;
   errors: string[];
@@ -182,7 +163,15 @@ export function verifyLedger(markdown: string): VerifyResult {
     errors.push('ledger is missing the Date header row');
   }
   rows.forEach((r, i) => {
-    validateRow(r).forEach((e) => errors.push(`row ${i + 1}: ${e}`));
+    if (r.verdict && !VERDICTS.includes(r.verdict)) {
+      errors.push(`row ${i + 1}: verdict "${r.verdict}" not in ${VERDICTS.join('|')}`);
+    }
+    if (r.evaluated && !EVALS.includes(r.evaluated)) {
+      errors.push(`row ${i + 1}: evaluated "${r.evaluated}" not in ${EVALS.join('|')}`);
+    }
+    if (r.date && !/^\d{4}-\d{2}-\d{2}$/.test(r.date)) {
+      errors.push(`row ${i + 1}: date "${r.date}" is not YYYY-MM-DD`);
+    }
   });
   return { ok: errors.length === 0, errors, warnings, rowCount: rows.length };
 }
