@@ -220,6 +220,29 @@ describe('verify-entrypoint', () => {
     expect(r.code).toBe(1);
     expect(r.err).toContain('no exec()');
   });
+
+  it('annotates a live darwin verdict as repo-independent when --sandbox mock is configured', async () => {
+    const io = mockIOWithExec(async () => ({ code: 0, stdout: 'leaderboard output', stderr: '' }));
+    const r = await run(['verify-entrypoint', 'darwin', '--cmd', 'npx @metaharness/darwin evolve . --sandbox mock'], io);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('darwin: live');
+    expect(r.out).toContain('repo-independent');
+    expect(r.out).toContain('do not treat this result as evidence about this repository');
+  });
+
+  it('does not annotate a live darwin verdict for --sandbox real (not measured for repo-independence)', async () => {
+    const io = mockIOWithExec(async () => ({ code: 0, stdout: 'leaderboard output', stderr: '' }));
+    const r = await run(['verify-entrypoint', 'darwin', '--cmd', 'npx @metaharness/darwin evolve . --sandbox real'], io);
+    expect(r.out).toContain('darwin: live');
+    expect(r.out).not.toContain('repo-independent');
+  });
+
+  it('does not annotate a non-darwin label even with a --sandbox mock-shaped command', async () => {
+    const io = mockIOWithExec(async () => ({ code: 0, stdout: 'ok', stderr: '' }));
+    const r = await run(['verify-entrypoint', 'bench', '--cmd', 'some-tool --sandbox mock'], io);
+    expect(r.out).toContain('bench: live');
+    expect(r.out).not.toContain('repo-independent');
+  });
 });
 
 describe('verify-entrypoints', () => {
@@ -275,6 +298,23 @@ describe('verify-entrypoints', () => {
     const r = await run(['verify-entrypoints'], mockIO({ 'dream.config.json': cfgJson }));
     expect(r.code).toBe(1);
     expect(r.err).toContain('no exec()');
+  });
+
+  it('annotates a live darwin verdict as repo-independent when the configured command specifies --sandbox mock', async () => {
+    const mockCfgJson = JSON.stringify({
+      repo: 'o/n',
+      cron: '0 9 * * *',
+      slots: [{ deep: 'd', scan: ['a', 'b'] }],
+      evaluatorEntrypoints: { bench: 'npm test', darwin: 'npx @metaharness/darwin evolve . --sandbox mock' },
+    });
+    const io = mockIOWithExec(async (cmd) => {
+      if (cmd === 'npm test') return { code: 0, stdout: '98 passed', stderr: '' };
+      return { code: 0, stdout: 'leaderboard output', stderr: '' };
+    }, { 'dream.config.json': mockCfgJson });
+    const r = await run(['verify-entrypoints'], io);
+    expect(r.out).toContain('darwin: live');
+    expect(r.out).toContain('repo-independent');
+    expect(r.code).toBe(0);
   });
 });
 
