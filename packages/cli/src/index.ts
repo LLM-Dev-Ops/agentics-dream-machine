@@ -18,7 +18,8 @@ import {
 import { stamp, verify, verifySteps } from '@dream-machine/witness';
 import { serializeRoutine, scheduleInstructions } from '@dream-machine/schedule';
 import { renderDashboard } from './tui.js';
-import { classifyEntrypointResult, classifyConfiguredEntrypoints, type ExecResult } from './entrypoint.js';
+import { classifyEntrypointResult, classifyConfiguredEntrypoints, type ExecResult, type EntrypointCheck } from './entrypoint.js';
+import { classifySandboxDiagnosticity, extractSandboxMode } from './darwin-sandbox.js';
 
 export const VERSION = '0.1.1';
 
@@ -108,6 +109,25 @@ Docs: https://ruvnet.github.io/dream-machine/`;
 async function loadConfig(io: IO, path: string): Promise<DreamConfig> {
   const raw = await io.readFile(path);
   return JSON.parse(raw) as DreamConfig;
+}
+
+/**
+ * Formats one `verify-entrypoint(s)` output line. For the `darwin` label's `live`
+ * verdict specifically, appends a repo-independence annotation when the configured
+ * command's `--sandbox` mode is one {@link classifySandboxDiagnosticity} has evidence
+ * for (currently only `mock`, per PR #111, 2026-11-01) — so a human reading `darwin:
+ * live` does not mistake a result that never inspected this repo for evidence about
+ * it. Every other label, and every non-`live` darwin verdict, is unaffected: this
+ * never changes the verdict/exit-code semantics, only the human-readable line.
+ */
+function formatEntrypointLine(label: string, cmd: string, check: EntrypointCheck): string {
+  const base = `${label}: ${check.verdict} (exit ${check.code}) — ${check.reason}`;
+  if (label !== 'darwin' || check.verdict !== 'live') return base;
+  const mode = extractSandboxMode(cmd);
+  if (mode === undefined) return base;
+  const diagnosticity = classifySandboxDiagnosticity(mode);
+  if (!diagnosticity.repoIndependent) return base;
+  return `${base} [repo-independent: ${diagnosticity.reason} — do not treat this result as evidence about this repository]`;
 }
 
 /** Run a dream-machine command. Never throws — errors become {code:1}. */
@@ -292,7 +312,7 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
         }
         const result = await io.exec(cmd);
         const check = classifyEntrypointResult(result);
-        sink.log(`${label}: ${check.verdict} (exit ${check.code}) — ${check.reason}`);
+        sink.log(formatEntrypointLine(label, cmd, check));
         const code = check.verdict === 'live' ? 0 : check.verdict === 'blocked' ? 1 : 2;
         return { code, out: sink.out, err: sink.err };
       }
@@ -313,7 +333,7 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
         const results = await classifyConfiguredEntrypoints(Object.fromEntries(entries), io.exec);
         let worst = 0;
         for (const r of results) {
-          sink.log(`${r.label}: ${r.verdict} (exit ${r.code}) — ${r.reason}`);
+          sink.log(formatEntrypointLine(r.label, r.cmd, r));
           worst = Math.max(worst, r.verdict === 'live' ? 0 : r.verdict === 'blocked' ? 1 : 2);
         }
         return { code: worst, out: sink.out, err: sink.err };
