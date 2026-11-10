@@ -47,6 +47,23 @@ describe('validateConfig', () => {
   it('rejects a non-integer bonus modulus key', () => {
     expect(validateConfig({ ...metaharness, bonusModuli: { x: 'y' } }).ok).toBe(false);
   });
+  it.each([
+    ['an object', {}],
+    ['null', null],
+    ['a number', 123],
+    ['an empty string', ''],
+    ['a whitespace-only string', '   '],
+  ])('rejects a bonus modulus value that is %s', (_label, badSurface) => {
+    const r = validateConfig({
+      ...metaharness,
+      bonusModuli: { '25': badSurface as unknown as string },
+    });
+    expect(r.ok).toBe(false);
+    expect(r.errors.join()).toMatch(/bonusModuli\["25"\] must be a non-empty string/);
+  });
+  it('accepts a well-typed, non-empty bonus modulus value', () => {
+    expect(validateConfig({ ...metaharness, bonusModuli: { '25': 'vertical-packs' } }).ok).toBe(true);
+  });
 });
 
 describe('compile', () => {
@@ -54,6 +71,15 @@ describe('compile', () => {
 
   it('throws on an invalid config', () => {
     expect(() => compile({ ...metaharness, repo: '' })).toThrow(/invalid dream.config/);
+  });
+
+  it('throws instead of silently rendering a malformed bonusModuli value into the compiled prompt', () => {
+    // Before the bonusModuli value guard, this produced a compiled prompt
+    // containing the literal line "DAYINT % 25 == 0  -> add [object Object]"
+    // (string-interpolating a non-string value with no validation error).
+    expect(() =>
+      compile({ ...metaharness, bonusModuli: { '25': {} as unknown as string } }),
+    ).toThrow(/bonusModuli\["25"\] must be a non-empty string/);
   });
 
   it('is deterministic (same input → identical output)', () => {

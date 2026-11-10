@@ -95,8 +95,11 @@ export function validateConfig(config: Partial<DreamConfig>): ValidationResult {
     });
   }
   if (config.bonusModuli) {
-    for (const k of Object.keys(config.bonusModuli)) {
+    for (const [k, surface] of Object.entries(config.bonusModuli)) {
       if (!/^\d+$/.test(k)) errors.push(`bonusModuli key "${k}" must be an integer`);
+      if (typeof surface !== 'string' || surface.trim() === '') {
+        errors.push(`bonusModuli["${k}"] must be a non-empty string, got ${JSON.stringify(surface)}`);
+      }
     }
   }
   return { ok: errors.length === 0, errors, warnings };
