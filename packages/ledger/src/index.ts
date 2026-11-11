@@ -181,8 +181,19 @@ export function verifyLedger(markdown: string): VerifyResult {
 // ---------------------------------------------------------------------------
 
 export interface LearningSignals {
-  /** No candidate PR merged in the last `window` nights → prefer tiny candidates. */
+  /**
+   * No candidate PR merged in the last `window` nights → prefer tiny candidates.
+   * Only ever `true` when {@link mergeDataAvailable} is also `true` — with no
+   * `mergedPrNumbers` supplied there is no confirmed merge history to assert
+   * zero against, so this is `false` rather than defaulting to a false positive.
+   */
   zeroMergeStreak: boolean;
+  /**
+   * Whether `mergedPrNumbers` was supplied at all. `false` means "unknown", not
+   * "confirmed clean" — callers should render this distinctly from a real
+   * zero-merge streak instead of silently treating absent data as good news.
+   */
+  mergeDataAvailable: boolean;
   /** A finding substring seen in >= 3 prior rows → duplicate direction, rotate. */
   duplicateDirections: string[];
   /** >= 3 consecutive gist self-scores < 5 → reduce to a single deep surface. */
@@ -212,11 +223,13 @@ export function learningSignals(rows: LedgerRow[], opts: SignalOptions = {}): Le
   const window = opts.window ?? 14;
   const recent = rows.slice(-window);
 
-  // Zero-merge streak: no PR in the window is known-merged.
+  // Zero-merge streak: no PR in the window is known-merged. Requires real merge
+  // data — absent `mergedPrNumbers` is "unknown", never coerced into "zero".
   const merged = opts.mergedPrNumbers;
+  const mergeDataAvailable = merged !== undefined;
   const prsInWindow = recent.map((r) => prNumber(r.pr)).filter((n): n is string => !!n);
   const zeroMergeStreak =
-    prsInWindow.length > 0 && (!merged || prsInWindow.every((n) => !merged.has(n)));
+    mergeDataAvailable && prsInWindow.length > 0 && prsInWindow.every((n) => !merged.has(n));
 
   // Duplicate directions: normalized finding text repeated >= 3 times.
   const counts = new Map<string, number>();
@@ -239,6 +252,7 @@ export function learningSignals(rows: LedgerRow[], opts: SignalOptions = {}): Le
 
   return {
     zeroMergeStreak,
+    mergeDataAvailable,
     duplicateDirections,
     lowScoreStreak,
     blockedEvalStreak,

@@ -91,14 +91,18 @@ Commands:
   compile [config] [--out FILE]                        Compile config → routine prompt
   schedule [config] [--out FILE] [--env ID]            Emit the /schedule routine body
   ledger verify   [--path LEDGER.md]                   Structurally verify a ledger
-  ledger signals  [--path LEDGER.md]                   Print STEP 1.1 learning signals
+  ledger signals  [--path LEDGER.md] [--merged 8,9]    Print STEP 1.1 learning signals
   ledger stats    [--path LEDGER.md]                   Verdict distribution
   ledger append   --path L --date .. --deep .. ...     Append one row
   witness stamp   <report-file> <commit>               Compute the witness triple
   witness verify  <report-file> <commit> <witness>     Verify a claimed witness
   verify-entrypoint <label> --cmd "<command>"           Classify an evaluator entrypoint's liveness
   verify-entrypoints [config]                           Classify every evaluatorEntrypoints in a dream.config
-  tui             [--path LEDGER.md] [--no-color]      Render the dashboard
+  tui             [--path LEDGER.md] [--no-color] [--merged 8,9]   Render the dashboard
+
+  --merged is a comma-separated list of PR numbers known to be merged (e.g. from
+  'gh pr list --state merged'). Without it, zero-merge-streak is reported as
+  unknown, never as a false "zero merges" positive.
   version | --version                                  Print version
   help    | --help                                     This help
 
@@ -108,6 +112,20 @@ Docs: https://ruvnet.github.io/dream-machine/`;
 async function loadConfig(io: IO, path: string): Promise<DreamConfig> {
   const raw = await io.readFile(path);
   return JSON.parse(raw) as DreamConfig;
+}
+
+/**
+ * Parse `--merged 8,#9,12` into a PR-number set for `learningSignals`. Absent
+ * (`undefined`) is preserved as-is rather than coerced to an empty set — the
+ * caller not knowing merge state is a distinct signal from a confirmed-empty one.
+ */
+function parseMergedFlag(flag: string | boolean | undefined): Set<string> | undefined {
+  if (typeof flag !== 'string') return undefined;
+  const nums = flag
+    .split(',')
+    .map((s) => s.trim().replace(/^#/, ''))
+    .filter(Boolean);
+  return new Set(nums);
 }
 
 /** Run a dream-machine command. Never throws — errors become {code:1}. */
@@ -198,7 +216,7 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
         }
         if (sub === 'signals') {
           const { rows } = parseLedger(md);
-          sink.log(JSON.stringify(learningSignals(rows), null, 2));
+          sink.log(JSON.stringify(learningSignals(rows, { mergedPrNumbers: parseMergedFlag(flags.merged) }), null, 2));
           return { code: 0, out: sink.out, err: sink.err };
         }
         if (sub === 'stats') {
@@ -327,7 +345,13 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
         } catch {
           md = emptyLedger();
         }
-        sink.log(renderDashboard(md, { noColor: flags['no-color'] === true, repo: flags.repo as string | undefined }));
+        sink.log(
+          renderDashboard(md, {
+            noColor: flags['no-color'] === true,
+            repo: flags.repo as string | undefined,
+            mergedPrNumbers: parseMergedFlag(flags.merged),
+          }),
+        );
         return { code: 0, out: sink.out, err: sink.err };
       }
 

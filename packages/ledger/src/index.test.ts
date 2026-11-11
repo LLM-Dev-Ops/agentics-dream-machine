@@ -124,6 +124,19 @@ describe('learning signals', () => {
     const { rows } = parseLedger(l);
     const s = learningSignals(rows, { mergedPrNumbers: new Set(['105']) });
     expect(s.zeroMergeStreak).toBe(false);
+    expect(s.mergeDataAvailable).toBe(true);
+  });
+
+  it('reports merge data as unknown (not a false zero-merge positive) when mergedPrNumbers is omitted', () => {
+    // Regression: previously `zeroMergeStreak` defaulted to `true` whenever no
+    // merge data was supplied, indistinguishable from a real, confirmed streak —
+    // exactly the state this repo's own CLI/TUI callers were in before tonight.
+    let l = emptyLedger();
+    for (let i = 0; i < 14; i++) l = appendRow(l, row({ pr: `#${100 + i}` }));
+    const { rows } = parseLedger(l);
+    const s = learningSignals(rows);
+    expect(s.zeroMergeStreak).toBe(false);
+    expect(s.mergeDataAvailable).toBe(false);
   });
 
   it('detects duplicate directions repeated >= 3 times', () => {
