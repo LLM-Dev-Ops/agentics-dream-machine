@@ -101,7 +101,9 @@ Commands:
   compile [config] [--out FILE]                        Compile config → routine prompt
   schedule [config] [--out FILE] [--env ID]            Emit the /schedule routine body
   ledger verify   [--path LEDGER.md]                   Structurally verify a ledger
-  ledger signals  [--path LEDGER.md] [--merged 8,9] [--today YYYY-MM-DD]  Print STEP 1.1 learning signals
+  ledger signals  [--path LEDGER.md] [--merged 8,9] [--today YYYY-MM-DD]
+                  [--open N] [--backlog-threshold N]
+                                                         Print STEP 1.1 learning signals
   ledger stats    [--path LEDGER.md]                   Verdict distribution
   ledger append   --path L --date .. --deep .. ...     Append one row
   ledger check-witnesses --commit SHA [--path L] [--dir D]  Re-verify each row's witness against its committed report
@@ -109,13 +111,19 @@ Commands:
   witness verify  <report-file> <commit> <witness>     Verify a claimed witness
   verify-entrypoint <label> --cmd "<command>"           Classify an evaluator entrypoint's liveness
   verify-entrypoints [config]                           Classify every evaluatorEntrypoints in a dream.config
-  tui             [--path LEDGER.md] [--no-color] [--merged 8,9]   Render the dashboard
+  tui             [--path LEDGER.md] [--no-color] [--merged 8,9]
+                  [--open N] [--backlog-threshold N]      Render the dashboard
 
   --merged is a comma-separated list of PR numbers known to be merged (e.g. from
   'gh pr list --state merged'). Without it, zero-merge-streak is reported as
   unknown, never as a false "zero merges" positive.
   version | --version                                  Print version
   help    | --help                                     This help
+
+--open is the count of currently open, unreviewed dream-cycle candidate PRs
+(e.g. from 'gh pr list --label dream-cycle --state open --json number').
+Without it, backlog saturation is reported as unknown, never as a false
+"not saturated". --backlog-threshold overrides the default (10).
 
 The Dream Machine never merges. Evaluation is not promotion — a human decides.
 Docs: https://ruvnet.github.io/dream-machine/`;
@@ -137,6 +145,17 @@ function parseMergedFlag(flag: string | boolean | undefined): Set<string> | unde
     .map((s) => s.trim().replace(/^#/, ''))
     .filter(Boolean);
   return new Set(nums);
+}
+
+/**
+ * Parse a non-negative-integer flag (e.g. `--open 12`). Absent, non-numeric,
+ * negative, or fractional values stay `undefined` — a nonsensical count must
+ * never be treated as real data (see `backlogDataAvailable`/`mergeDataAvailable`).
+ */
+function parseNumberFlag(flag: string | boolean | undefined): number | undefined {
+  if (typeof flag !== 'string' || flag.trim() === '') return undefined;
+  const n = Number(flag);
+  return Number.isInteger(n) && n >= 0 ? n : undefined;
 }
 
 /** Run a dream-machine command. Never throws — errors become {code:1}. */
@@ -228,9 +247,16 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
         if (sub === 'signals') {
           const { rows } = parseLedger(md);
           const today = (flags.today as string) || io.now();
+          const openCandidateCount = parseNumberFlag(flags.open);
+          const backlogThreshold = parseNumberFlag(flags['backlog-threshold']);
           sink.log(
             JSON.stringify(
-              learningSignals(rows, { mergedPrNumbers: parseMergedFlag(flags.merged), today }),
+              learningSignals(rows, {
+                mergedPrNumbers: parseMergedFlag(flags.merged),
+                today,
+                openCandidateCount,
+                backlogThreshold,
+              }),
               null,
               2,
             ),
@@ -413,6 +439,8 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
             noColor: flags['no-color'] === true,
             repo: flags.repo as string | undefined,
             mergedPrNumbers: parseMergedFlag(flags.merged),
+            openCandidateCount: parseNumberFlag(flags.open),
+            backlogThreshold: parseNumberFlag(flags['backlog-threshold']),
           }),
         );
         return { code: 0, out: sink.out, err: sink.err };

@@ -40,6 +40,10 @@ export interface DashboardOptions {
   repo?: string;
   /** PR numbers known to be merged, e.g. from `gh pr list --state merged`. */
   mergedPrNumbers?: Set<string>;
+  /** Count of currently open, unreviewed dream-cycle candidate PRs. */
+  openCandidateCount?: number;
+  /** Open-candidate count at/above which the backlog counts as saturated. Default 10. */
+  backlogThreshold?: number;
 }
 
 /** Render the dashboard framebuffer from a ledger markdown string. */
@@ -47,7 +51,11 @@ export function renderDashboard(ledgerMd: string, opts: DashboardOptions = {}): 
   const c = opts.noColor ? new Proxy({}, { get: () => '' }) as typeof C : C;
   const { rows } = parseLedger(ledgerMd);
   const stats = verdictStats(rows);
-  const signals = learningSignals(rows, { mergedPrNumbers: opts.mergedPrNumbers });
+  const signals = learningSignals(rows, {
+    mergedPrNumbers: opts.mergedPrNumbers,
+    openCandidateCount: opts.openCandidateCount,
+    backlogThreshold: opts.backlogThreshold,
+  });
   const limit = opts.limit ?? 10;
   const recent = rows.slice(-limit).reverse();
   const total = rows.length;
@@ -93,8 +101,13 @@ export function renderDashboard(ledgerMd: string, opts: DashboardOptions = {}): 
   if (signals.duplicateDirections.length) sig.push(`${c.yellow}⚠ ${signals.duplicateDirections.length} duplicate direction(s)${c.reset}`);
   // Never claim a confirmed-clean state ("✓ signals nominal") when merge data is
   // actually unknown — that would misrepresent an unmeasured signal as a verified one.
-  const sigLine = sig.length ? sig.join('   ') : `${c.green}✓ signals nominal${c.reset}`;
-  lines.push(`${c.violet}│${c.reset} ${pad(sigLine, W - 2)} ${c.violet}│${c.reset}`);
+  if (signals.backlogSaturated) sig.push(`${c.yellow}⚠ backlog saturated (${opts.openCandidateCount} open, unreviewed)${c.reset}`);
+  const signalLines = sig.length ? sig : [`${c.green}✓ signals nominal${c.reset}`];
+  // Render each signal on its own row. Combining independent warnings into one
+  // fixed-width row can truncate the later warning and hide measured evidence.
+  for (const signal of signalLines) {
+    lines.push(`${c.violet}│${c.reset} ${pad(signal, W - 2)} ${c.violet}│${c.reset}`);
+  }
   lines.push(`${c.violet}│${c.reset} ${pad(`${c.dim}evaluation is not promotion · the machine never merges · a human does${c.reset}`, W - 2)} ${c.violet}│${c.reset}`);
   lines.push(`${c.violet}╰${bar}╯${c.reset}`);
 

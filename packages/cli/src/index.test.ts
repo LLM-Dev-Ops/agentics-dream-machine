@@ -134,6 +134,7 @@ describe('ledger', () => {
     const s = JSON.parse(r.out);
     expect(s).toHaveProperty('zeroMergeStreak', false);
     expect(s).toHaveProperty('mergeDataAvailable', false);
+    expect(s).toHaveProperty('backlogDataAvailable', false);
   });
   it('signals --merged supplies real merge data (both rows reference PR #181)', async () => {
     const r = await run(['ledger', 'signals', '--path', 'L.md', '--merged', '#181,205'], mockIO({ 'L.md': ledgerMd }));
@@ -158,6 +159,26 @@ describe('ledger', () => {
       mockIO({ 'L.md': ledgerMd }),
     );
     expect(JSON.parse(r.out).nightsSinceLastRow).toBe(6); // last row 2026-08-14 -> 2026-08-20
+  });
+
+  it('signals --open supplies a caller-provided open-candidate count', async () => {
+    const r = await run(['ledger', 'signals', '--path', 'L.md', '--open', '25'], mockIO({ 'L.md': ledgerMd }));
+    const s = JSON.parse(r.out);
+    expect(s.backlogDataAvailable).toBe(true);
+    expect(s.backlogSaturated).toBe(true);
+  });
+  it('signals --open --backlog-threshold honors a custom threshold', async () => {
+    const r = await run(
+      ['ledger', 'signals', '--path', 'L.md', '--open', '5', '--backlog-threshold', '10'],
+      mockIO({ 'L.md': ledgerMd }),
+    );
+    expect(JSON.parse(r.out).backlogSaturated).toBe(false);
+  });
+  it('signals --open rejects a negative or fractional count as unknown, not a bogus value', async () => {
+    const neg = await run(['ledger', 'signals', '--path', 'L.md', '--open', '-5'], mockIO({ 'L.md': ledgerMd }));
+    expect(JSON.parse(neg.out).backlogDataAvailable).toBe(false);
+    const frac = await run(['ledger', 'signals', '--path', 'L.md', '--open', '10.5'], mockIO({ 'L.md': ledgerMd }));
+    expect(JSON.parse(frac.out).backlogDataAvailable).toBe(false);
   });
   it('append writes a row (bootstraps ledger if missing)', async () => {
     const io = mockIO();
@@ -444,5 +465,15 @@ describe('tui', () => {
     expect(r.out).toContain('zero merges');
     const r2 = await run(['tui', '--path', 'L.md', '--no-color'], mockIO({ 'L.md': md }));
     expect(r2.out).toContain('merge status unknown');
+  });
+  it('shows a backlog-saturated warning once openCandidateCount reaches the threshold', () => {
+    const md = appendRow(emptyLedger(), sampleRow());
+    expect(renderDashboard(md, { noColor: true, openCandidateCount: 5 })).not.toContain('backlog saturated');
+    expect(renderDashboard(md, { noColor: true, openCandidateCount: 25 })).toContain('backlog saturated (25 open, unreviewed)');
+  });
+  it('CLI tui --open flows through to the rendered dashboard', async () => {
+    const md = appendRow(emptyLedger(), sampleRow());
+    const r = await run(['tui', '--path', 'L.md', '--no-color', '--open', '25'], mockIO({ 'L.md': md }));
+    expect(r.out).toContain('backlog saturated (25 open, unreviewed)');
   });
 });
