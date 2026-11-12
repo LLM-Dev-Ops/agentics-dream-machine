@@ -53,7 +53,7 @@
   "evaluatorEntrypoints": {
     "bench": "npm test",
     "darwin": "npx --yes @metaharness/darwin@0.10.3 evolve . --sandbox real",
-    "flywheel": "npx metaharness flywheel help"
+    "flywheel": "npx --yes metaharness@0.4.2 flywheel help"
   },
   "adrConvention": "4-digit",
   "competitors": [
