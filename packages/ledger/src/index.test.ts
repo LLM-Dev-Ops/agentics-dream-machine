@@ -5,6 +5,7 @@ import {
   appendRow,
   renderRow,
   verifyLedger,
+  validateRow,
   learningSignals,
   verdictStats,
   escapeCell,
@@ -106,6 +107,27 @@ describe('verifyLedger', () => {
     const r = verifyLedger('just some text, no table');
     expect(r.ok).toBe(false);
     expect(r.errors.join()).toMatch(/header/);
+  });
+});
+
+describe('validateRow', () => {
+  it('accepts a well-formed row', () => {
+    expect(validateRow(row())).toEqual([]);
+  });
+
+  it('flags an out-of-range verdict, evaluated, and date on the same row', () => {
+    const errors = validateRow(row({ verdict: 'NOT_A_VERDICT', evaluated: 'maybe', date: 'yesterday' }));
+    expect(errors).toHaveLength(3);
+    expect(errors.join()).toMatch(/verdict/);
+    expect(errors.join()).toMatch(/evaluated/);
+    expect(errors.join()).toMatch(/date/);
+  });
+
+  it('agrees with verifyLedger on the same malformed row (shared validator, not a re-implementation)', () => {
+    const bad = row({ verdict: 'MAYBE' });
+    const fromValidateRow = validateRow(bad);
+    const fromVerifyLedger = verifyLedger(appendRow(emptyLedger(), bad)).errors;
+    expect(fromVerifyLedger).toEqual(fromValidateRow.map((e) => `row 1: ${e}`));
   });
 });
 
