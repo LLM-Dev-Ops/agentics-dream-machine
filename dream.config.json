@@ -1,4 +1,5 @@
 {
+  "$schema": "./packages/compile/dream.config.schema.json",
   "repo": "LLM-Dev-Ops/agentics-dream-machine",
   "cron": "0 9 * * *",
   "slots": [
