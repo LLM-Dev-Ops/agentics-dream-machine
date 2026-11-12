@@ -18,7 +18,12 @@ import {
 import { stamp, verify, verifySteps } from '@dream-machine/witness';
 import { serializeRoutine, scheduleInstructions } from '@dream-machine/schedule';
 import { renderDashboard } from './tui.js';
-import { classifyEntrypointResult, classifyConfiguredEntrypoints, type ExecResult } from './entrypoint.js';
+import {
+  classifyEntrypointResult,
+  classifyConfiguredEntrypoints,
+  entrypointExitCode,
+  type ExecResult,
+} from './entrypoint.js';
 import { assessConfiguredSupplyChain } from './supplychain.js';
 
 export const VERSION = '0.1.1';
@@ -297,8 +302,7 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
         const result = await io.exec(cmd);
         const check = classifyEntrypointResult(result);
         sink.log(`${label}: ${check.verdict} (exit ${check.code}) — ${check.reason}`);
-        const code = check.verdict === 'live' ? 0 : check.verdict === 'blocked' ? 1 : 2;
-        return { code, out: sink.out, err: sink.err };
+        return { code: entrypointExitCode(check.verdict), out: sink.out, err: sink.err };
       }
 
       case 'verify-entrypoints': {
@@ -324,9 +328,8 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
           if (r.idempotency && !r.idempotency.idempotent) {
             sink.log(`${r.label}: NOT IDEMPOTENT — ${r.idempotency.reason}`);
           }
-          const verdictScore = r.verdict === 'live' ? 0 : r.verdict === 'blocked' ? 1 : 2;
           const idempotencyScore = r.idempotency && !r.idempotency.idempotent ? 1 : 0;
-          worst = Math.max(worst, verdictScore, idempotencyScore);
+          worst = Math.max(worst, entrypointExitCode(r.verdict), idempotencyScore);
         }
         return { code: worst, out: sink.out, err: sink.err };
       }
