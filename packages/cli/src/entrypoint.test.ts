@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyEntrypointResult, classifyConfiguredEntrypoints } from './entrypoint.js';
+import { classifyEntrypointResult, classifyConfiguredEntrypoints, classifyIdempotency } from './entrypoint.js';
 
 describe('classifyEntrypointResult', () => {
   it('flags a nonzero exit as blocked (reproduces npx @metaharness/flywheel: no bin field)', () => {
@@ -70,5 +70,64 @@ describe('classifyConfiguredEntrypoints', () => {
     const exec = async () => ({ code: 0, stdout: '', stderr: '' });
     const results = await classifyConfiguredEntrypoints({ redblue: 'npx @metaharness/redblue' }, exec);
     expect(results[0].verdict).toBe('suspicious-silent');
+  });
+
+  it('does not run each command twice, or attach idempotency, unless idempotencyCheck is requested', async () => {
+    let calls = 0;
+    const exec = async () => {
+      calls += 1;
+      return { code: 0, stdout: 'ok', stderr: '' };
+    };
+    const results = await classifyConfiguredEntrypoints({ bench: 'npm test' }, exec);
+    expect(calls).toBe(1);
+    expect(results[0].idempotency).toBeUndefined();
+  });
+
+  it(
+    "reproduces tonight's darwin --sandbox real state-pollution bug: live on a clean first run, " +
+      'blocked on the identical second run, flagged non-idempotent',
+    async () => {
+      let calls = 0;
+      const exec = async () => {
+        calls += 1;
+        if (calls === 1) return { code: 0, stdout: 'g1_v0 scored', stderr: '' };
+        return {
+          code: 1,
+          stdout: '',
+          stderr: 'Error: darwin: autonomous or generated child id already exists: g1_v0',
+        };
+      };
+      const results = await classifyConfiguredEntrypoints(
+        { darwin: 'npx @metaharness/darwin evolve --sandbox real' },
+        exec,
+        { idempotencyCheck: true },
+      );
+      expect(calls).toBe(2);
+      expect(results[0].verdict).toBe('live');
+      expect(results[0].idempotency).toEqual({
+        idempotent: false,
+        reason:
+          "first run classified 'live' (produced output), second run classified 'blocked' " +
+          '(Error: darwin: autonomous or generated child id already exists: g1_v0) — entrypoint is ' +
+          "stateful/non-reproducible; do not trust a single-shot 'live' verdict",
+      });
+    },
+  );
+});
+
+describe('classifyIdempotency', () => {
+  it('reports idempotent when both runs agree', () => {
+    const live = { verdict: 'live' as const, code: 0, reason: 'produced output' };
+    const r = classifyIdempotency(live, live);
+    expect(r).toEqual({ idempotent: true, reason: "both runs classified 'live'" });
+  });
+
+  it('reports non-idempotent when verdicts diverge between runs', () => {
+    const first = { verdict: 'live' as const, code: 0, reason: 'produced output' };
+    const second = { verdict: 'blocked' as const, code: 1, reason: 'boom' };
+    const r = classifyIdempotency(first, second);
+    expect(r.idempotent).toBe(false);
+    expect(r.reason).toContain("first run classified 'live'");
+    expect(r.reason).toContain("second run classified 'blocked'");
   });
 });
