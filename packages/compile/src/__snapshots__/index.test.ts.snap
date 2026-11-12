@@ -179,6 +179,13 @@ real evaluator, then the candidate on the identical corpus/policy.
 Evaluator entrypoints for this repo:
 - bench: \`experiments/*/run.mjs\`
 
+Before trusting any evaluator-entrypoint result as evidence, route its raw exec
+result through the live/blocked/suspicious-silent classifier (\`dream-machine
+verify-entrypoints\` if the CLI is built, else \`classifyEntrypointResult\`
+directly) — exit 0 alone is not sufficient to record \`EVALUATED=yes\`; a
+\`suspicious-silent\` verdict (exit 0, empty stdout AND stderr) blocks that
+claim until investigated.
+
 Do not infer results from logs. Preserve the real receipt. If evaluation is
 blocked by infrastructure/credentials: \`EVALUATED=blocked / VERDICT=INCONCLUSIVE\`
 with the exact blocker — never invent a fallback metric. The candidate may never
