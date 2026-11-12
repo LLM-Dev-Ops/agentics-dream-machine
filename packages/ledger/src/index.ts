@@ -104,16 +104,34 @@ export interface ParseResult {
   warnings: string[];
 }
 
-/** Parse a LEDGER.md string into typed rows (skips header/divider/blank lines). */
+/**
+ * Parse a LEDGER.md string into typed rows (skips header/divider/blank lines).
+ *
+ * Bounded to the FIRST contiguous pipe-table: once the header divider has been
+ * seen, a blank line (or any subsequent line without a leading `|`) ends the
+ * table. Without this bound, any later markdown in the file — an appendix, a
+ * quarantined-rows archive, prose containing a literal "|" — would silently be
+ * swept in as additional ledger rows. (A bulk row-injection incident on
+ * 2026-08-26 depended on exactly this ambiguity going undetected; see
+ * docs/dream-cycle/LEDGER.md's quarantine section.)
+ */
 export function parseLedger(markdown: string): ParseResult {
   const rows: LedgerRow[] = [];
   const warnings: string[] = [];
   const lines = markdown.split(/\r?\n/);
   let seenHeader = false;
+  let seenDivider = false;
   for (const line of lines) {
-    if (!line.trim() || !line.includes('|')) continue;
+    const trimmed = line.trim();
+    if (!trimmed || !trimmed.startsWith('|')) {
+      if (seenDivider) break; // end of the single bounded ledger table
+      continue;
+    }
     const cells = splitRow(line);
-    if (isDivider(cells)) continue;
+    if (isDivider(cells)) {
+      seenDivider = true;
+      continue;
+    }
     // First pipe-row is the header.
     if (!seenHeader) {
       seenHeader = true;
