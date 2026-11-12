@@ -109,11 +109,17 @@ describe('compile', () => {
     expect(prompt).not.toContain('guarded auto-merge ENABLED');
   });
 
-  it('describes GUARDED auto-merge only when enabled', () => {
+  it('describes auto-merge as CONFIGURED-but-UNREACHABLE, not ENABLED, because STEP 20-25 always opens a draft PR', () => {
+    // GitHub refuses to merge, or even enable auto-merge on, a draft pull
+    // request — and STEP 20-25 (below) opens every dream-cycle PR as a draft
+    // unconditionally. Claiming the auto-merge pathway is "ENABLED" here
+    // would be false: it cannot fire until a human marks a PR ready for
+    // review, regardless of label/CI/protected-path status.
     const p = compile({ ...metaharness, autoMerge: true });
-    expect(p).toContain('guarded auto-merge ENABLED');
-    expect(p).toContain('explicit low-risk label');
-    // Even with auto-merge, the session itself never merges.
+    expect(p).not.toContain('guarded auto-merge ENABLED');
+    expect(p).toContain('guarded auto-merge CONFIGURED, currently UNREACHABLE');
+    expect(p).toContain('does not allow merging or enabling auto-merge on a draft pull request');
+    // Even though unreachable, the session itself still never merges.
     expect(p).toContain('session itself still never runs the merge');
   });
 
