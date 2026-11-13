@@ -14,6 +14,7 @@ import {
   learningSignals,
   verdictStats,
   validateRow,
+  conflictRisks,
   type LedgerRow,
 } from '@dream-machine/ledger';
 import { stamp, verify, verifyPrefix, verifySteps } from '@dream-machine/witness';
@@ -105,6 +106,7 @@ Commands:
                   [--open N] [--backlog-threshold N]
                                                          Print STEP 1.1 learning signals
   ledger stats    [--path LEDGER.md]                   Verdict distribution
+  ledger conflict-risk --files-json '{"#12":[...]}'     File-overlap risk between open candidate PRs
   ledger append   --path L --date .. --deep .. ...     Append one row
   ledger check-witnesses --commit SHA [--path L] [--dir D]  Re-verify each row's witness against its committed report
   witness stamp   <report-file> <commit>               Compute the witness triple
@@ -268,6 +270,36 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
           sink.log(JSON.stringify(verdictStats(rows), null, 2));
           return { code: 0, out: sink.out, err: sink.err };
         }
+        if (sub === 'conflict-risk') {
+          const raw = flags['files-json'];
+          if (typeof raw !== 'string') {
+            sink.error(
+              'usage: dream-machine ledger conflict-risk --files-json \'{"#12":["a.ts"],"#16":["a.ts"]}\'',
+            );
+            return { code: 1, out: sink.out, err: sink.err };
+          }
+          let parsed: Record<string, string[]>;
+          try {
+            parsed = JSON.parse(raw) as Record<string, string[]>;
+          } catch {
+            sink.error('conflict-risk: --files-json is not valid JSON');
+            return { code: 1, out: sink.out, err: sink.err };
+          }
+          if (
+            !parsed ||
+            Array.isArray(parsed) ||
+            typeof parsed !== 'object' ||
+            !Object.values(parsed).every(
+              (files) => Array.isArray(files) && files.every((file) => typeof file === 'string'),
+            )
+          ) {
+            sink.error('conflict-risk: --files-json must map labels to arrays of file paths');
+            return { code: 1, out: sink.out, err: sink.err };
+          }
+          const candidates = Object.entries(parsed).map(([label, files]) => ({ label, files }));
+          sink.log(JSON.stringify(conflictRisks(candidates), null, 2));
+          return { code: 0, out: sink.out, err: sink.err };
+        }
         if (sub === 'append') {
           const row: LedgerRow = {
             date: (flags.date as string) || io.now(),
@@ -331,7 +363,7 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
           }
           return { code: anyFail ? 1 : 0, out: sink.out, err: sink.err };
         }
-        sink.error('ledger: expected sub-command verify|signals|stats|append|check-witnesses');
+        sink.error('ledger: expected sub-command verify|signals|stats|append|conflict-risk|check-witnesses');
         return { code: 1, out: sink.out, err: sink.err };
       }
 
