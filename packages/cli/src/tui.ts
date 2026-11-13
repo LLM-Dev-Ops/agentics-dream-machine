@@ -18,16 +18,44 @@ const C = {
   gray: '\x1b[38;5;245m',
 };
 
-function verdictColor(v: string): string {
-  if (v === 'ACCEPT') return C.green;
-  if (v === 'REJECT') return C.red;
-  if (v === 'INCONCLUSIVE') return C.yellow;
-  return C.gray;
+function verdictColor(c: typeof C, v: string): string {
+  if (v === 'ACCEPT') return c.green;
+  if (v === 'REJECT') return c.red;
+  if (v === 'INCONCLUSIVE') return c.yellow;
+  return c.gray;
+}
+
+const ANSI = /\x1b\[[0-9;]*m/;
+
+/**
+ * Truncate to `maxVisible` visible characters, passing any embedded ANSI
+ * escapes through untouched (never splitting one mid-sequence). Only emits a
+ * trailing reset if an escape was actually consumed, so plain/no-color input
+ * stays byte-for-byte plain.
+ */
+function truncateVisible(s: string, maxVisible: number): string {
+  let visible = 0;
+  let i = 0;
+  let out = '';
+  let sawAnsi = false;
+  while (i < s.length && visible < maxVisible) {
+    const m = ANSI.exec(s.slice(i));
+    if (m && m.index === 0) {
+      out += m[0];
+      i += m[0].length;
+      sawAnsi = true;
+      continue;
+    }
+    out += s[i];
+    visible++;
+    i++;
+  }
+  return out + '…' + (sawAnsi ? '\x1b[0m' : '');
 }
 
 function pad(s: string, n: number): string {
   const clean = s.replace(/\x1b\[[0-9;]*m/g, '');
-  if (clean.length > n) return s.slice(0, Math.max(0, n - 1)) + '…';
+  if (clean.length > n) return truncateVisible(s, Math.max(0, n - 1));
   return s + ' '.repeat(n - clean.length);
 }
 
@@ -75,7 +103,7 @@ export function renderDashboard(ledgerMd: string, opts: DashboardOptions = {}): 
       const row =
         `${pad(r.date, 11)} ` +
         `${c.magenta}${pad(r.deep, 20)}${c.reset} ` +
-        `${verdictColor(r.verdict)}${pad(r.verdict, 14)}${c.reset} ` +
+        `${verdictColor(c, r.verdict)}${pad(r.verdict, 14)}${c.reset} ` +
         `${pad(r.finding, 28)}`;
       lines.push(`${c.violet}│${c.reset} ${pad(row, W - 2)} ${c.violet}│${c.reset}`);
     }
