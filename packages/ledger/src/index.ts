@@ -104,16 +104,34 @@ export interface ParseResult {
   warnings: string[];
 }
 
-/** Parse a LEDGER.md string into typed rows (skips header/divider/blank lines). */
+/**
+ * Parse a LEDGER.md string into typed rows (skips header/divider/blank lines).
+ *
+ * Bounded to the FIRST contiguous pipe-table: once the header divider has been
+ * seen, a blank line (or any subsequent line without a leading `|`) ends the
+ * table. Without this bound, any later markdown in the file — an appendix, a
+ * quarantined-rows archive, prose containing a literal "|" — would silently be
+ * swept in as additional ledger rows. (A bulk row-injection incident on
+ * 2026-08-26 depended on exactly this ambiguity going undetected; see
+ * docs/dream-cycle/LEDGER.md's quarantine section.)
+ */
 export function parseLedger(markdown: string): ParseResult {
   const rows: LedgerRow[] = [];
   const warnings: string[] = [];
   const lines = markdown.split(/\r?\n/);
   let seenHeader = false;
+  let seenDivider = false;
   for (const line of lines) {
-    if (!line.trim() || !line.includes('|')) continue;
+    const trimmed = line.trim();
+    if (!trimmed || !trimmed.startsWith('|')) {
+      if (seenDivider) break; // end of the single bounded ledger table
+      continue;
+    }
     const cells = splitRow(line);
-    if (isDivider(cells)) continue;
+    if (isDivider(cells)) {
+      seenDivider = true;
+      continue;
+    }
     // First pipe-row is the header.
     if (!seenHeader) {
       seenHeader = true;
@@ -155,6 +173,26 @@ export interface VerifyResult {
   rowCount: number;
 }
 
+/**
+ * Validate a single row's field values against the same schema `verifyLedger`
+ * enforces (date format, verdict/evaluated enums) — shared so a row can be
+ * rejected at the moment it's about to be written, not only discovered later
+ * by a separate `ledger verify` pass over an already-corrupted file.
+ */
+export function validateRow(row: LedgerRow): string[] {
+  const errors: string[] = [];
+  if (row.verdict && !VERDICTS.includes(row.verdict)) {
+    errors.push(`verdict "${row.verdict}" not in ${VERDICTS.join('|')}`);
+  }
+  if (row.evaluated && !EVALS.includes(row.evaluated)) {
+    errors.push(`evaluated "${row.evaluated}" not in ${EVALS.join('|')}`);
+  }
+  if (row.date && !/^\d{4}-\d{2}-\d{2}$/.test(row.date)) {
+    errors.push(`date "${row.date}" is not YYYY-MM-DD`);
+  }
+  return errors;
+}
+
 /** Structurally verify a ledger: header present, verdicts/evaluated in range. */
 export function verifyLedger(markdown: string): VerifyResult {
   const errors: string[] = [];
@@ -163,15 +201,7 @@ export function verifyLedger(markdown: string): VerifyResult {
     errors.push('ledger is missing the Date header row');
   }
   rows.forEach((r, i) => {
-    if (r.verdict && !VERDICTS.includes(r.verdict)) {
-      errors.push(`row ${i + 1}: verdict "${r.verdict}" not in ${VERDICTS.join('|')}`);
-    }
-    if (r.evaluated && !EVALS.includes(r.evaluated)) {
-      errors.push(`row ${i + 1}: evaluated "${r.evaluated}" not in ${EVALS.join('|')}`);
-    }
-    if (r.date && !/^\d{4}-\d{2}-\d{2}$/.test(r.date)) {
-      errors.push(`row ${i + 1}: date "${r.date}" is not YYYY-MM-DD`);
-    }
+    for (const e of validateRow(r)) errors.push(`row ${i + 1}: ${e}`);
   });
   return { ok: errors.length === 0, errors, warnings, rowCount: rows.length };
 }
@@ -181,8 +211,19 @@ export function verifyLedger(markdown: string): VerifyResult {
 // ---------------------------------------------------------------------------
 
 export interface LearningSignals {
-  /** No candidate PR merged in the last `window` nights → prefer tiny candidates. */
+  /**
+   * No candidate PR merged in the last `window` nights → prefer tiny candidates.
+   * Only ever `true` when {@link mergeDataAvailable} is also `true` — with no
+   * `mergedPrNumbers` supplied there is no confirmed merge history to assert
+   * zero against, so this is `false` rather than defaulting to a false positive.
+   */
   zeroMergeStreak: boolean;
+  /**
+   * Whether `mergedPrNumbers` was supplied at all. `false` means "unknown", not
+   * "confirmed clean" — callers should render this distinctly from a real
+   * zero-merge streak instead of silently treating absent data as good news.
+   */
+  mergeDataAvailable: boolean;
   /** A finding substring seen in >= 3 prior rows → duplicate direction, rotate. */
   duplicateDirections: string[];
   /** >= 3 consecutive gist self-scores < 5 → reduce to a single deep surface. */
@@ -191,6 +232,22 @@ export interface LearningSignals {
   blockedEvalStreak: boolean;
   /** Count of nights considered. */
   nightsConsidered: number;
+  /**
+   * Calendar nights between the last dated row and `today` (from `SignalOptions.today`).
+   * Null when `today` wasn't supplied, or the ledger has no dated row — never fabricated.
+   * A ledger's rows commonly land inside a still-open draft PR's branch rather than
+   * on `main`, so `main`'s ledger can silently lag several real nights behind.
+   */
+  nightsSinceLastRow: number | null;
+  /** Whether `openCandidateCount` was supplied — false means "unknown", not "not saturated". */
+  backlogDataAvailable: boolean;
+  /**
+   * `openCandidateCount` >= `backlogThreshold` → the review queue, not candidate
+   * generation, is the bottleneck; bias away from shipping another unreviewed
+   * candidate PR and toward escalation/verification-only nights. Only ever
+   * `true` when {@link backlogDataAvailable} is also `true`.
+   */
+  backlogSaturated: boolean;
 }
 
 export interface SignalOptions {
@@ -200,6 +257,17 @@ export interface SignalOptions {
   recentScores?: number[];
   /** Which PR numbers actually merged (so we can detect the zero-merge streak). */
   mergedPrNumbers?: Set<string>;
+  /** Today's date (YYYY-MM-DD), for ledger-staleness detection. Omit to skip the check. */
+  today?: string;
+  /**
+   * Count of currently open, unreviewed dream-cycle candidate PRs — e.g. from
+   * `gh pr list --label dream-cycle --state open --json number` (or the
+   * equivalent GitHub API call), counted by the caller and passed in. Never
+   * fetched here: this function stays pure, no I/O, no network calls.
+   */
+  openCandidateCount?: number;
+  /** Open-candidate count at/above which the backlog counts as saturated. Default 10. */
+  backlogThreshold?: number;
 }
 
 function prNumber(pr: string): string | null {
@@ -207,16 +275,28 @@ function prNumber(pr: string): string | null {
   return m ? m[1] : null;
 }
 
+/** UTC calendar-day difference `b - a`, or null if either isn't YYYY-MM-DD. */
+function daysBetweenUTC(a: string, b: string): number | null {
+  const ma = /^(\d{4})-(\d{2})-(\d{2})$/.exec(a);
+  const mb = /^(\d{4})-(\d{2})-(\d{2})$/.exec(b);
+  if (!ma || !mb) return null;
+  const da = Date.UTC(+ma[1], +ma[2] - 1, +ma[3]);
+  const db = Date.UTC(+mb[1], +mb[2] - 1, +mb[3]);
+  return Math.round((db - da) / 86_400_000);
+}
+
 /** Compute the STEP 1.1 learning signals from parsed rows. */
 export function learningSignals(rows: LedgerRow[], opts: SignalOptions = {}): LearningSignals {
   const window = opts.window ?? 14;
   const recent = rows.slice(-window);
 
-  // Zero-merge streak: no PR in the window is known-merged.
+  // Zero-merge streak: no PR in the window is known-merged. Requires real merge
+  // data — absent `mergedPrNumbers` is "unknown", never coerced into "zero".
   const merged = opts.mergedPrNumbers;
+  const mergeDataAvailable = merged !== undefined;
   const prsInWindow = recent.map((r) => prNumber(r.pr)).filter((n): n is string => !!n);
   const zeroMergeStreak =
-    prsInWindow.length > 0 && (!merged || prsInWindow.every((n) => !merged.has(n)));
+    mergeDataAvailable && prsInWindow.length > 0 && prsInWindow.every((n) => !merged.has(n));
 
   // Duplicate directions: normalized finding text repeated >= 3 times.
   const counts = new Map<string, number>();
@@ -237,12 +317,34 @@ export function learningSignals(rows: LedgerRow[], opts: SignalOptions = {}): Le
   const blockedEvalStreak =
     recent.length >= 3 && lastThreeEvals.length === 3 && lastThreeEvals.every((e) => e === 'blocked');
 
+  // Ledger staleness: gap between the last dated row and `today`, when supplied.
+  let nightsSinceLastRow: number | null = null;
+  if (opts.today) {
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const d = daysBetweenUTC(rows[i].date, opts.today);
+      if (d !== null) {
+        nightsSinceLastRow = d;
+        break;
+      }
+    }
+  }
+
+  // Backlog saturation: requires a real count — absent `openCandidateCount` is
+  // "unknown", never coerced into "not saturated" (same honesty rule as above).
+  const backlogDataAvailable = opts.openCandidateCount !== undefined;
+  const backlogThreshold = opts.backlogThreshold ?? 10;
+  const backlogSaturated = backlogDataAvailable && (opts.openCandidateCount as number) >= backlogThreshold;
+
   return {
     zeroMergeStreak,
+    mergeDataAvailable,
     duplicateDirections,
     lowScoreStreak,
     blockedEvalStreak,
     nightsConsidered: recent.length,
+    nightsSinceLastRow,
+    backlogDataAvailable,
+    backlogSaturated,
   };
 }
 
@@ -254,4 +356,63 @@ export function verdictStats(rows: LedgerRow[]): Record<string, number> {
     else stats.other += 1;
   }
   return stats;
+}
+
+// ---------------------------------------------------------------------------
+// Candidate conflict risk — detects open candidate PRs that are no longer
+// independently mergeable because they edited the same files from the same
+// stale base. Caller supplies each candidate's real changed-file list (e.g.
+// from `git diff --name-only` or the GitHub API); this stays pure, same
+// honesty-signal pattern as `mergeDataAvailable`/`backlogDataAvailable` —
+// no git/network call happens inside this module.
+// ---------------------------------------------------------------------------
+
+export interface CandidateFiles {
+  /** Human-readable candidate label, e.g. "#12" or a branch name. */
+  label: string;
+  /** Changed file paths, relative to the repo root. */
+  files: string[];
+}
+
+export interface ConflictRisk {
+  a: string;
+  b: string;
+  /** Changed files both candidates touch (excluding `ignorePaths`). */
+  sharedFiles: string[];
+}
+
+/**
+ * Paths every dream-cycle night touches by design (e.g. the append-only
+ * ledger) — overlapping there is expected and trivially resolved, so it
+ * would otherwise swamp this signal with a "conflict" on every single pair.
+ */
+export const DEFAULT_CONFLICT_IGNORE_PATHS: ReadonlySet<string> = new Set([
+  'docs/dream-cycle/LEDGER.md',
+]);
+
+/**
+ * File-overlap conflict risk between candidates, pairwise. This is a
+ * conservative heuristic (file-level, not line-level): it can flag a pair
+ * that `git merge` would actually resolve cleanly (two edits to the same
+ * file in disjoint regions), but it will never miss a pair that touches no
+ * common file, and in practice (see this repo's own 2026-10-16 evaluation
+ * receipt) every pair it flags that was checked against a real `git merge
+ * --no-commit` did conflict in at least one of the flagged files.
+ */
+export function conflictRisks(
+  candidates: CandidateFiles[],
+  opts: { ignorePaths?: ReadonlySet<string> } = {},
+): ConflictRisk[] {
+  const ignore = opts.ignorePaths ?? DEFAULT_CONFLICT_IGNORE_PATHS;
+  const risks: ConflictRisk[] = [];
+  for (let i = 0; i < candidates.length; i++) {
+    const filesA = new Set(candidates[i].files.filter((f) => !ignore.has(f)));
+    for (let j = i + 1; j < candidates.length; j++) {
+      const sharedFiles = candidates[j].files.filter((f) => !ignore.has(f) && filesA.has(f));
+      if (sharedFiles.length) {
+        risks.push({ a: candidates[i].label, b: candidates[j].label, sharedFiles });
+      }
+    }
+  }
+  return risks;
 }

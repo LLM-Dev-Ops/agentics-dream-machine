@@ -1,16 +1,24 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import {
   emptyLedger,
   parseLedger,
   appendRow,
   renderRow,
   verifyLedger,
+  validateRow,
   learningSignals,
   verdictStats,
   escapeCell,
+  conflictRisks,
   LEDGER_COLUMNS,
   type LedgerRow,
 } from './index.js';
+
+const REAL_LEDGER_PATH = fileURLToPath(
+  new URL('../../../docs/dream-cycle/LEDGER.md', import.meta.url),
+);
 
 function row(over: Partial<LedgerRow> = {}): LedgerRow {
   return {
@@ -107,6 +115,45 @@ describe('verifyLedger', () => {
     expect(r.ok).toBe(false);
     expect(r.errors.join()).toMatch(/header/);
   });
+
+  it('bounds parsing to the first table: a blank line ends the table, so trailing markdown (an archive/quarantine section, prose with a literal "|") is never swept in as rows', () => {
+    const l =
+      appendRow(emptyLedger(), row()) +
+      '\n## Quarantined rows (foreign-repo contamination)\n\n' +
+      '| 2099-01-01 | not-a-real-night | injected via drive-by PR | #999 | #999 | yes | ACCEPT | n/a | deadbeef | should never be parsed |\n';
+    const { rows, warnings } = parseLedger(l);
+    expect(rows).toHaveLength(1);
+    expect(warnings).toEqual([]);
+    expect(verifyLedger(l).rowCount).toBe(1);
+  });
+
+  it('the real repository ledger (docs/dream-cycle/LEDGER.md) verifies clean — regression canary against ledger contamination', () => {
+    const md = readFileSync(REAL_LEDGER_PATH, 'utf8');
+    const r = verifyLedger(md);
+    expect(r.errors).toEqual([]);
+    expect(r.ok).toBe(true);
+  });
+});
+
+describe('validateRow', () => {
+  it('accepts a well-formed row', () => {
+    expect(validateRow(row())).toEqual([]);
+  });
+
+  it('flags an out-of-range verdict, evaluated, and date on the same row', () => {
+    const errors = validateRow(row({ verdict: 'NOT_A_VERDICT', evaluated: 'maybe', date: 'yesterday' }));
+    expect(errors).toHaveLength(3);
+    expect(errors.join()).toMatch(/verdict/);
+    expect(errors.join()).toMatch(/evaluated/);
+    expect(errors.join()).toMatch(/date/);
+  });
+
+  it('agrees with verifyLedger on the same malformed row (shared validator, not a re-implementation)', () => {
+    const bad = row({ verdict: 'MAYBE' });
+    const fromValidateRow = validateRow(bad);
+    const fromVerifyLedger = verifyLedger(appendRow(emptyLedger(), bad)).errors;
+    expect(fromVerifyLedger).toEqual(fromValidateRow.map((e) => `row 1: ${e}`));
+  });
 });
 
 describe('learning signals', () => {
@@ -124,6 +171,19 @@ describe('learning signals', () => {
     const { rows } = parseLedger(l);
     const s = learningSignals(rows, { mergedPrNumbers: new Set(['105']) });
     expect(s.zeroMergeStreak).toBe(false);
+    expect(s.mergeDataAvailable).toBe(true);
+  });
+
+  it('reports merge data as unknown (not a false zero-merge positive) when mergedPrNumbers is omitted', () => {
+    // Regression: previously `zeroMergeStreak` defaulted to `true` whenever no
+    // merge data was supplied, indistinguishable from a real, confirmed streak —
+    // exactly the state this repo's own CLI/TUI callers were in before tonight.
+    let l = emptyLedger();
+    for (let i = 0; i < 14; i++) l = appendRow(l, row({ pr: `#${100 + i}` }));
+    const { rows } = parseLedger(l);
+    const s = learningSignals(rows);
+    expect(s.zeroMergeStreak).toBe(false);
+    expect(s.mergeDataAvailable).toBe(false);
   });
 
   it('detects duplicate directions repeated >= 3 times', () => {
@@ -147,6 +207,46 @@ describe('learning signals', () => {
     const { rows } = parseLedger(l);
     expect(learningSignals(rows).blockedEvalStreak).toBe(true);
   });
+
+  it('nightsSinceLastRow is null when `today` is not supplied', () => {
+    const { rows } = parseLedger(appendRow(emptyLedger(), row({ date: '2026-09-08' })));
+    expect(learningSignals(rows).nightsSinceLastRow).toBeNull();
+  });
+
+  it('nightsSinceLastRow is null on an empty ledger even with `today`', () => {
+    expect(learningSignals([], { today: '2026-09-11' }).nightsSinceLastRow).toBeNull();
+  });
+
+  it('nightsSinceLastRow is 0 when the last row is today', () => {
+    const { rows } = parseLedger(appendRow(emptyLedger(), row({ date: '2026-09-11' })));
+    expect(learningSignals(rows, { today: '2026-09-11' }).nightsSinceLastRow).toBe(0);
+  });
+
+  it('nightsSinceLastRow reports the real gap (this repo: 2026-09-08 -> 2026-09-11 is 3)', () => {
+    const { rows } = parseLedger(appendRow(emptyLedger(), row({ date: '2026-09-08' })));
+    expect(learningSignals(rows, { today: '2026-09-11' }).nightsSinceLastRow).toBe(3);
+  });
+
+  it('reports backlog data as unknown (not "not saturated") when openCandidateCount is omitted', () => {
+    const { rows } = parseLedger(appendRow(emptyLedger(), row()));
+    const s = learningSignals(rows);
+    expect(s.backlogDataAvailable).toBe(false);
+    expect(s.backlogSaturated).toBe(false);
+  });
+
+  it('flags backlog saturation once openCandidateCount reaches the threshold', () => {
+    const { rows } = parseLedger(appendRow(emptyLedger(), row()));
+    expect(learningSignals(rows, { openCandidateCount: 9 }).backlogSaturated).toBe(false);
+    const saturated = learningSignals(rows, { openCandidateCount: 10 });
+    expect(saturated.backlogDataAvailable).toBe(true);
+    expect(saturated.backlogSaturated).toBe(true);
+  });
+
+  it('honors a custom backlogThreshold', () => {
+    const { rows } = parseLedger(appendRow(emptyLedger(), row()));
+    expect(learningSignals(rows, { openCandidateCount: 3, backlogThreshold: 3 }).backlogSaturated).toBe(true);
+    expect(learningSignals(rows, { openCandidateCount: 2, backlogThreshold: 3 }).backlogSaturated).toBe(false);
+  });
 });
 
 describe('verdictStats', () => {
@@ -159,4 +259,105 @@ describe('verdictStats', () => {
     const s = verdictStats(parseLedger(l).rows);
     expect(s).toEqual({ ACCEPT: 1, REJECT: 1, INCONCLUSIVE: 2, other: 0 });
   });
+});
+
+describe('conflictRisks', () => {
+  it('flags no risk when candidates touch disjoint files', () => {
+    const risks = conflictRisks([
+      { label: 'a', files: ['packages/x/a.ts'] },
+      { label: 'b', files: ['packages/y/b.ts'] },
+    ]);
+    expect(risks).toEqual([]);
+  });
+
+  it('flags a shared non-ignored file between two candidates', () => {
+    const risks = conflictRisks([
+      { label: 'a', files: ['packages/ledger/src/index.ts', 'docs/dream-cycle/LEDGER.md'] },
+      { label: 'b', files: ['packages/ledger/src/index.ts'] },
+    ]);
+    expect(risks).toEqual([{ a: 'a', b: 'b', sharedFiles: ['packages/ledger/src/index.ts'] }]);
+  });
+
+  it('ignores docs/dream-cycle/LEDGER.md by default (every night appends there)', () => {
+    const risks = conflictRisks([
+      { label: 'a', files: ['docs/dream-cycle/LEDGER.md'] },
+      { label: 'b', files: ['docs/dream-cycle/LEDGER.md'] },
+    ]);
+    expect(risks).toEqual([]);
+  });
+
+  it('a custom ignorePaths set overrides the default', () => {
+    const risks = conflictRisks(
+      [
+        { label: 'a', files: ['x.ts'] },
+        { label: 'b', files: ['x.ts'] },
+      ],
+      { ignorePaths: new Set(['x.ts']) },
+    );
+    expect(risks).toEqual([]);
+  });
+
+  it(
+    'reproduces this repo\'s real 2026-10-16 evaluation receipt: PR #12, #16, #58 ' +
+      'pairwise-flag on their real changed-file lists; #58 x #69 does not',
+    () => {
+      // Real changed-file lists, read from GitHub (`pull_request_read`) on
+      // 2026-10-16, for this repo's actual open ledger-signals-lineage PRs.
+      const pr12 = {
+        label: '#12',
+        files: [
+          'packages/ledger/src/index.ts',
+          'packages/ledger/src/index.test.ts',
+          'packages/cli/src/index.ts',
+          'packages/cli/src/index.test.ts',
+          'packages/cli/src/tui.ts',
+          'docs/dream-cycle/2026-09-09-developer-experience-report.md',
+          'docs/dream-cycle/LEDGER.md',
+        ],
+      };
+      const pr16 = {
+        label: '#16',
+        files: [
+          'packages/ledger/src/index.ts',
+          'packages/ledger/src/index.test.ts',
+          'packages/cli/src/index.ts',
+          'packages/cli/src/index.test.ts',
+          'docs/dream-cycle/2026-09-11-ledger-signals-report.md',
+          'docs/dream-cycle/LEDGER.md',
+        ],
+      };
+      const pr58 = {
+        label: '#58',
+        files: [
+          'packages/ledger/src/index.ts',
+          'packages/ledger/src/index.test.ts',
+          'packages/cli/src/index.ts',
+          'packages/cli/src/index.test.ts',
+          'packages/cli/src/tui.ts',
+          'docs/dream-cycle/2026-10-06-ledger-signals-report.md',
+          'docs/dream-cycle/LEDGER.md',
+        ],
+      };
+      const pr69 = {
+        label: '#69',
+        files: [
+          '.github/workflows/automerge.yml',
+          'packages/compile/src/automergeWorkflowTriggers.ts',
+          'packages/compile/src/automergeWorkflowTriggers.test.ts',
+          'docs/dream-cycle/2026-10-11-ledger-signals-report.md',
+          'docs/dream-cycle/LEDGER.md',
+        ],
+      };
+
+      const risks = conflictRisks([pr12, pr16, pr58, pr69]);
+      const pairs = risks.map((r) => `${r.a}x${r.b}`).sort();
+      // Ground truth, confirmed tonight by real `git merge --no-commit --no-ff`
+      // between the actual PR branches: #12x#16, #12x#58, #16x#58 all produced
+      // real CONTENT conflicts beyond the expected LEDGER.md row; #58x#69
+      // conflicted only in LEDGER.md (ignored here) because they touch
+      // disjoint packages.
+      expect(pairs).toEqual(['#12x#16', '#12x#58', '#16x#58']);
+      expect(risks.every((r) => r.sharedFiles.length > 0)).toBe(true);
+    },
+  );
 });

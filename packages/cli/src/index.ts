@@ -13,9 +13,11 @@ import {
   emptyLedger,
   learningSignals,
   verdictStats,
+  validateRow,
+  conflictRisks,
   type LedgerRow,
 } from '@dream-machine/ledger';
-import { stamp, verify, verifySteps } from '@dream-machine/witness';
+import { stamp, verify, verifyPrefix, verifySteps } from '@dream-machine/witness';
 import { serializeRoutine, scheduleInstructions } from '@dream-machine/schedule';
 import { renderDashboard } from './tui.js';
 import { classifyEntrypointResult, classifyConfiguredEntrypoints, type ExecResult } from './entrypoint.js';
@@ -56,6 +58,15 @@ function makeSink() {
   };
 }
 
+/**
+ * The two report-file naming conventions this repo's own nightly runs have
+ * actually used for a ledger row (plain report, and the gists/ subdirectory
+ * variant) — tried in order by `ledger check-witnesses`.
+ */
+export function reportPathsFor(row: { date: string; deep: string }, dir: string): string[] {
+  return [`${dir}/${row.date}-${row.deep}-report.md`, `${dir}/gists/${row.date}-${row.deep}.md`];
+}
+
 /** Minimal flag parser: --key val, --key=val, --bool, positionals. */
 export function parseArgs(argv: string[]): { _: string[]; flags: Record<string, string | boolean> } {
   const _: string[] = [];
@@ -91,16 +102,30 @@ Commands:
   compile [config] [--out FILE]                        Compile config → routine prompt
   schedule [config] [--out FILE] [--env ID]            Emit the /schedule routine body
   ledger verify   [--path LEDGER.md]                   Structurally verify a ledger
-  ledger signals  [--path LEDGER.md]                   Print STEP 1.1 learning signals
+  ledger signals  [--path LEDGER.md] [--merged 8,9] [--today YYYY-MM-DD]
+                  [--open N] [--backlog-threshold N]
+                                                         Print STEP 1.1 learning signals
   ledger stats    [--path LEDGER.md]                   Verdict distribution
+  ledger conflict-risk --files-json '{"#12":[...]}'     File-overlap risk between open candidate PRs
   ledger append   --path L --date .. --deep .. ...     Append one row
+  ledger check-witnesses --commit SHA [--path L] [--dir D]  Re-verify each row's witness against its committed report
   witness stamp   <report-file> <commit>               Compute the witness triple
   witness verify  <report-file> <commit> <witness>     Verify a claimed witness
   verify-entrypoint <label> --cmd "<command>"           Classify an evaluator entrypoint's liveness
   verify-entrypoints [config]                           Classify every evaluatorEntrypoints in a dream.config
-  tui             [--path LEDGER.md] [--no-color]      Render the dashboard
+  tui             [--path LEDGER.md] [--no-color] [--merged 8,9]
+                  [--open N] [--backlog-threshold N]      Render the dashboard
+
+  --merged is a comma-separated list of PR numbers known to be merged (e.g. from
+  'gh pr list --state merged'). Without it, zero-merge-streak is reported as
+  unknown, never as a false "zero merges" positive.
   version | --version                                  Print version
   help    | --help                                     This help
+
+--open is the count of currently open, unreviewed dream-cycle candidate PRs
+(e.g. from 'gh pr list --label dream-cycle --state open --json number').
+Without it, backlog saturation is reported as unknown, never as a false
+"not saturated". --backlog-threshold overrides the default (10).
 
 The Dream Machine never merges. Evaluation is not promotion — a human decides.
 Docs: https://ruvnet.github.io/dream-machine/`;
@@ -108,6 +133,31 @@ Docs: https://ruvnet.github.io/dream-machine/`;
 async function loadConfig(io: IO, path: string): Promise<DreamConfig> {
   const raw = await io.readFile(path);
   return JSON.parse(raw) as DreamConfig;
+}
+
+/**
+ * Parse `--merged 8,#9,12` into a PR-number set for `learningSignals`. Absent
+ * (`undefined`) is preserved as-is rather than coerced to an empty set — the
+ * caller not knowing merge state is a distinct signal from a confirmed-empty one.
+ */
+function parseMergedFlag(flag: string | boolean | undefined): Set<string> | undefined {
+  if (typeof flag !== 'string') return undefined;
+  const nums = flag
+    .split(',')
+    .map((s) => s.trim().replace(/^#/, ''))
+    .filter(Boolean);
+  return new Set(nums);
+}
+
+/**
+ * Parse a non-negative-integer flag (e.g. `--open 12`). Absent, non-numeric,
+ * negative, or fractional values stay `undefined` — a nonsensical count must
+ * never be treated as real data (see `backlogDataAvailable`/`mergeDataAvailable`).
+ */
+function parseNumberFlag(flag: string | boolean | undefined): number | undefined {
+  if (typeof flag !== 'string' || flag.trim() === '') return undefined;
+  const n = Number(flag);
+  return Number.isInteger(n) && n >= 0 ? n : undefined;
 }
 
 /** Run a dream-machine command. Never throws — errors become {code:1}. */
@@ -198,12 +248,56 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
         }
         if (sub === 'signals') {
           const { rows } = parseLedger(md);
-          sink.log(JSON.stringify(learningSignals(rows), null, 2));
+          const today = (flags.today as string) || io.now();
+          const openCandidateCount = parseNumberFlag(flags.open);
+          const backlogThreshold = parseNumberFlag(flags['backlog-threshold']);
+          sink.log(
+            JSON.stringify(
+              learningSignals(rows, {
+                mergedPrNumbers: parseMergedFlag(flags.merged),
+                today,
+                openCandidateCount,
+                backlogThreshold,
+              }),
+              null,
+              2,
+            ),
+          );
           return { code: 0, out: sink.out, err: sink.err };
         }
         if (sub === 'stats') {
           const { rows } = parseLedger(md);
           sink.log(JSON.stringify(verdictStats(rows), null, 2));
+          return { code: 0, out: sink.out, err: sink.err };
+        }
+        if (sub === 'conflict-risk') {
+          const raw = flags['files-json'];
+          if (typeof raw !== 'string') {
+            sink.error(
+              'usage: dream-machine ledger conflict-risk --files-json \'{"#12":["a.ts"],"#16":["a.ts"]}\'',
+            );
+            return { code: 1, out: sink.out, err: sink.err };
+          }
+          let parsed: Record<string, string[]>;
+          try {
+            parsed = JSON.parse(raw) as Record<string, string[]>;
+          } catch {
+            sink.error('conflict-risk: --files-json is not valid JSON');
+            return { code: 1, out: sink.out, err: sink.err };
+          }
+          if (
+            !parsed ||
+            Array.isArray(parsed) ||
+            typeof parsed !== 'object' ||
+            !Object.values(parsed).every(
+              (files) => Array.isArray(files) && files.every((file) => typeof file === 'string'),
+            )
+          ) {
+            sink.error('conflict-risk: --files-json must map labels to arrays of file paths');
+            return { code: 1, out: sink.out, err: sink.err };
+          }
+          const candidates = Object.entries(parsed).map(([label, files]) => ({ label, files }));
+          sink.log(JSON.stringify(conflictRisks(candidates), null, 2));
           return { code: 0, out: sink.out, err: sink.err };
         }
         if (sub === 'append') {
@@ -219,12 +313,57 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
             witness: (flags.witness as string) || '',
             priorFates: (flags.priorFates as string) || '',
           };
+          const rowErrors = validateRow(row);
+          if (rowErrors.length > 0) {
+            sink.error(`ledger append: refusing to write an invalid row (${path} left unchanged):`);
+            rowErrors.forEach((e) => sink.error(`  - ${e}`));
+            return { code: 1, out: sink.out, err: sink.err };
+          }
           const next = appendRow(md, row);
           await io.writeFile(path, next);
           sink.log(`appended row to ${path} (verdict=${row.verdict})`);
           return { code: 0, out: sink.out, err: sink.err };
         }
-        sink.error('ledger: expected sub-command verify|signals|stats|append');
+        if (sub === 'check-witnesses') {
+          const commit = flags.commit as string | undefined;
+          if (!commit) {
+            sink.error('usage: dream-machine ledger check-witnesses --commit <sha> [--path L] [--dir docs/dream-cycle]');
+            return { code: 1, out: sink.out, err: sink.err };
+          }
+          const dir = (flags.dir as string) || 'docs/dream-cycle';
+          const { rows } = parseLedger(md);
+          let anyFail = false;
+          for (const row of rows) {
+            if (!row.witness) {
+              sink.log(`${row.date}: SKIP (no witness recorded)`);
+              continue;
+            }
+            let found: { path: string; content: string } | undefined;
+            for (const p of reportPathsFor(row, dir)) {
+              try {
+                found = { path: p, content: await io.readFile(p) };
+                break;
+              } catch {
+                // try the next naming convention
+              }
+            }
+            if (!found) {
+              sink.log(`${row.date}: MISSING (no report file at ${reportPathsFor(row, dir).join(' or ')})`);
+              continue;
+            }
+            const r = verifyPrefix(found.content, commit, row.witness);
+            if (r.ok) {
+              sink.log(`${row.date}: PASS (${found.path} verifies against ${row.witness})`);
+            } else {
+              anyFail = true;
+              sink.log(
+                `${row.date}: FAIL (${found.path} does not reproduce witness ${row.witness} against commit ${commit} — ${r.reason}; recomputed prefix ${r.expected.witness.slice(0, 8)})`,
+              );
+            }
+          }
+          return { code: anyFail ? 1 : 0, out: sink.out, err: sink.err };
+        }
+        sink.error('ledger: expected sub-command verify|signals|stats|append|conflict-risk|check-witnesses');
         return { code: 1, out: sink.out, err: sink.err };
       }
 
@@ -327,7 +466,15 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
         } catch {
           md = emptyLedger();
         }
-        sink.log(renderDashboard(md, { noColor: flags['no-color'] === true, repo: flags.repo as string | undefined }));
+        sink.log(
+          renderDashboard(md, {
+            noColor: flags['no-color'] === true,
+            repo: flags.repo as string | undefined,
+            mergedPrNumbers: parseMergedFlag(flags.merged),
+            openCandidateCount: parseNumberFlag(flags.open),
+            backlogThreshold: parseNumberFlag(flags['backlog-threshold']),
+          }),
+        );
         return { code: 0, out: sink.out, err: sink.err };
       }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { run, parseArgs, VERSION, type IO } from './index.js';
+import { run, parseArgs, VERSION, reportPathsFor, type IO } from './index.js';
 import { renderDashboard } from './tui.js';
 import { appendRow, emptyLedger, type LedgerRow } from '@dream-machine/ledger';
 import { stamp } from '@dream-machine/witness';
@@ -129,9 +129,56 @@ describe('ledger', () => {
     expect(JSON.parse(r.out).ACCEPT).toBe(1);
     expect(JSON.parse(r.out).REJECT).toBe(1);
   });
-  it('signals', async () => {
+  it('signals reports merge data as unknown, not a false zero-merge positive, without --merged', async () => {
     const r = await run(['ledger', 'signals', '--path', 'L.md'], mockIO({ 'L.md': ledgerMd }));
-    expect(JSON.parse(r.out)).toHaveProperty('zeroMergeStreak');
+    const s = JSON.parse(r.out);
+    expect(s).toHaveProperty('zeroMergeStreak', false);
+    expect(s).toHaveProperty('mergeDataAvailable', false);
+    expect(s).toHaveProperty('backlogDataAvailable', false);
+  });
+  it('signals --merged supplies real merge data (both rows reference PR #181)', async () => {
+    const r = await run(['ledger', 'signals', '--path', 'L.md', '--merged', '#181,205'], mockIO({ 'L.md': ledgerMd }));
+    const s = JSON.parse(r.out);
+    expect(s).toHaveProperty('mergeDataAvailable', true);
+    expect(s).toHaveProperty('zeroMergeStreak', false);
+  });
+  it('signals --merged with a disjoint set correctly reports a real zero-merge streak', async () => {
+    const r = await run(['ledger', 'signals', '--path', 'L.md', '--merged', '999'], mockIO({ 'L.md': ledgerMd }));
+    const s = JSON.parse(r.out);
+    expect(s).toHaveProperty('mergeDataAvailable', true);
+    expect(s).toHaveProperty('zeroMergeStreak', true);
+  });
+  it('signals defaults `today` to io.now() and surfaces ledger staleness', async () => {
+    const stale = appendRow(emptyLedger(), sampleRow({ date: '2026-08-10' }));
+    const r = await run(['ledger', 'signals', '--path', 'L.md'], mockIO({ 'L.md': stale }));
+    expect(JSON.parse(r.out).nightsSinceLastRow).toBe(3); // mockIO.now() === '2026-08-13'
+  });
+  it('signals --today overrides the injected clock', async () => {
+    const r = await run(
+      ['ledger', 'signals', '--path', 'L.md', '--today', '2026-08-20'],
+      mockIO({ 'L.md': ledgerMd }),
+    );
+    expect(JSON.parse(r.out).nightsSinceLastRow).toBe(6); // last row 2026-08-14 -> 2026-08-20
+  });
+
+  it('signals --open supplies a caller-provided open-candidate count', async () => {
+    const r = await run(['ledger', 'signals', '--path', 'L.md', '--open', '25'], mockIO({ 'L.md': ledgerMd }));
+    const s = JSON.parse(r.out);
+    expect(s.backlogDataAvailable).toBe(true);
+    expect(s.backlogSaturated).toBe(true);
+  });
+  it('signals --open --backlog-threshold honors a custom threshold', async () => {
+    const r = await run(
+      ['ledger', 'signals', '--path', 'L.md', '--open', '5', '--backlog-threshold', '10'],
+      mockIO({ 'L.md': ledgerMd }),
+    );
+    expect(JSON.parse(r.out).backlogSaturated).toBe(false);
+  });
+  it('signals --open rejects a negative or fractional count as unknown, not a bogus value', async () => {
+    const neg = await run(['ledger', 'signals', '--path', 'L.md', '--open', '-5'], mockIO({ 'L.md': ledgerMd }));
+    expect(JSON.parse(neg.out).backlogDataAvailable).toBe(false);
+    const frac = await run(['ledger', 'signals', '--path', 'L.md', '--open', '10.5'], mockIO({ 'L.md': ledgerMd }));
+    expect(JSON.parse(frac.out).backlogDataAvailable).toBe(false);
   });
   it('append writes a row (bootstraps ledger if missing)', async () => {
     const io = mockIO();
@@ -141,6 +188,137 @@ describe('ledger', () => {
     );
     expect(r.code).toBe(0);
     expect(io.files['L.md']).toContain('| perf |');
+  });
+  it('conflict-risk flags a shared file between two candidates', async () => {
+    const r = await run(
+      ['ledger', 'conflict-risk', '--files-json', '{"#12":["a.ts"],"#16":["a.ts"],"#69":["b.ts"]}'],
+      mockIO(),
+    );
+    expect(r.code).toBe(0);
+    const risks = JSON.parse(r.out);
+    expect(risks).toEqual([{ a: '#12', b: '#16', sharedFiles: ['a.ts'] }]);
+  });
+  it('conflict-risk requires --files-json', async () => {
+    const r = await run(['ledger', 'conflict-risk'], mockIO());
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('--files-json');
+  });
+  it('conflict-risk rejects invalid JSON', async () => {
+    const r = await run(['ledger', 'conflict-risk', '--files-json', 'not json'], mockIO());
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('not valid JSON');
+  });
+  it('conflict-risk rejects structurally invalid JSON instead of crashing', async () => {
+    const r = await run(['ledger', 'conflict-risk', '--files-json', '{"#12":"a.ts"}'], mockIO());
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('map labels to arrays of file paths');
+  });
+
+  it('append refuses an invalid verdict and leaves the ledger file untouched', async () => {
+    const io = mockIO({ 'L.md': ledgerMd });
+    const before = io.files['L.md'];
+    const r = await run(
+      ['ledger', 'append', '--path', 'L.md', '--deep', 'perf', '--finding', 'x', '--verdict', 'NOT_A_VERDICT'],
+      io,
+    );
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('refusing to write an invalid row');
+    expect(r.err).toContain('verdict "NOT_A_VERDICT"');
+    expect(io.files['L.md']).toBe(before);
+  });
+
+  it('append refuses a malformed date and a bad evaluated value together', async () => {
+    const io = mockIO();
+    const r = await run(
+      [
+        'ledger',
+        'append',
+        '--path',
+        'L.md',
+        '--date',
+        'not-a-date',
+        '--deep',
+        'perf',
+        '--finding',
+        'x',
+        '--verdict',
+        'ACCEPT',
+        '--evaluated',
+        'maybe',
+      ],
+      io,
+    );
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('date "not-a-date"');
+    expect(r.err).toContain('evaluated "maybe"');
+    expect(io.files['L.md']).toBeUndefined();
+  });
+
+  describe('check-witnesses', () => {
+    const commit = '2fba2550182d81b36423447221823e98e227482a';
+    const report = '# a genuine, unedited report\n';
+    const w = stamp(report, commit);
+
+    it('requires --commit', async () => {
+      const r = await run(['ledger', 'check-witnesses', '--path', 'L.md'], mockIO({ 'L.md': ledgerMd }));
+      expect(r.code).toBe(1);
+      expect(r.err).toContain('--commit');
+    });
+
+    it('passes a row whose committed report still reproduces the ledger witness prefix', async () => {
+      const row = sampleRow({ witness: w.witness.slice(0, 8) });
+      const md = appendRow(emptyLedger(), row);
+      const io = mockIO({ 'L.md': md, 'docs/dream-cycle/2026-08-13-security-adversarial-report.md': report });
+      const r = await run(['ledger', 'check-witnesses', '--path', 'L.md', '--commit', commit], io);
+      expect(r.code).toBe(0);
+      expect(r.out).toContain('PASS');
+    });
+
+    it('flags a row whose report was edited after being stamped', async () => {
+      const row = sampleRow({ witness: w.witness.slice(0, 8) });
+      const md = appendRow(emptyLedger(), row);
+      const io = mockIO({
+        'L.md': md,
+        'docs/dream-cycle/2026-08-13-security-adversarial-report.md': report + '\nedited after stamping\n',
+      });
+      const r = await run(['ledger', 'check-witnesses', '--path', 'L.md', '--commit', commit], io);
+      expect(r.code).toBe(1);
+      expect(r.out).toContain('FAIL');
+    });
+
+    it('reports MISSING when no report file exists at either convention, without failing the run', async () => {
+      const row = sampleRow({ witness: w.witness.slice(0, 8) });
+      const md = appendRow(emptyLedger(), row);
+      const r = await run(['ledger', 'check-witnesses', '--path', 'L.md', '--commit', commit], mockIO({ 'L.md': md }));
+      expect(r.code).toBe(0);
+      expect(r.out).toContain('MISSING');
+    });
+
+    it('falls back to the gists/ naming convention', async () => {
+      const row = sampleRow({ witness: w.witness.slice(0, 8) });
+      const md = appendRow(emptyLedger(), row);
+      const io = mockIO({ 'L.md': md, 'docs/dream-cycle/gists/2026-08-13-security-adversarial.md': report });
+      const r = await run(['ledger', 'check-witnesses', '--path', 'L.md', '--commit', commit], io);
+      expect(r.code).toBe(0);
+      expect(r.out).toContain('PASS');
+    });
+
+    it('skips a row with no recorded witness', async () => {
+      const row = sampleRow({ witness: '' });
+      const md = appendRow(emptyLedger(), row);
+      const r = await run(['ledger', 'check-witnesses', '--path', 'L.md', '--commit', commit], mockIO({ 'L.md': md }));
+      expect(r.code).toBe(0);
+      expect(r.out).toContain('SKIP');
+    });
+  });
+});
+
+describe('reportPathsFor', () => {
+  it('tries the plain report convention then the gists/ convention', () => {
+    expect(reportPathsFor({ date: '2026-09-19', deep: 'developer-experience' }, 'docs/dream-cycle')).toEqual([
+      'docs/dream-cycle/2026-09-19-developer-experience-report.md',
+      'docs/dream-cycle/gists/2026-09-19-developer-experience.md',
+    ]);
   });
 });
 
@@ -291,10 +469,35 @@ describe('tui', () => {
     const frame = renderDashboard(emptyLedger(), { noColor: true });
     expect(frame).toContain('no dream nights yet');
   });
-  it('shows a zero-merge warning', () => {
+  it('shows a zero-merge warning when merge data is supplied and confirms zero', () => {
+    let md = emptyLedger();
+    for (let i = 0; i < 14; i++) md = appendRow(md, sampleRow({ pr: `#${i}`, verdict: 'INCONCLUSIVE' }));
+    const frame = renderDashboard(md, { noColor: true, mergedPrNumbers: new Set() });
+    expect(frame).toContain('zero merges');
+  });
+  it('shows merge status as unknown, never a false zero-merge warning, without merge data', () => {
     let md = emptyLedger();
     for (let i = 0; i < 14; i++) md = appendRow(md, sampleRow({ pr: `#${i}`, verdict: 'INCONCLUSIVE' }));
     const frame = renderDashboard(md, { noColor: true });
-    expect(frame).toContain('zero merges');
+    expect(frame).toContain('merge status unknown');
+    expect(frame).not.toContain('zero merges');
+  });
+  it('CLI tui --merged flows through to the rendered dashboard', async () => {
+    let md = emptyLedger();
+    for (let i = 0; i < 14; i++) md = appendRow(md, sampleRow({ pr: `#${i}`, verdict: 'INCONCLUSIVE' }));
+    const r = await run(['tui', '--path', 'L.md', '--no-color', '--merged', '999'], mockIO({ 'L.md': md }));
+    expect(r.out).toContain('zero merges');
+    const r2 = await run(['tui', '--path', 'L.md', '--no-color'], mockIO({ 'L.md': md }));
+    expect(r2.out).toContain('merge status unknown');
+  });
+  it('shows a backlog-saturated warning once openCandidateCount reaches the threshold', () => {
+    const md = appendRow(emptyLedger(), sampleRow());
+    expect(renderDashboard(md, { noColor: true, openCandidateCount: 5 })).not.toContain('backlog saturated');
+    expect(renderDashboard(md, { noColor: true, openCandidateCount: 25 })).toContain('backlog saturated (25 open, unreviewed)');
+  });
+  it('CLI tui --open flows through to the rendered dashboard', async () => {
+    const md = appendRow(emptyLedger(), sampleRow());
+    const r = await run(['tui', '--path', 'L.md', '--no-color', '--open', '25'], mockIO({ 'L.md': md }));
+    expect(r.out).toContain('backlog saturated (25 open, unreviewed)');
   });
 });
