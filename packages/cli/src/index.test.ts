@@ -97,6 +97,24 @@ describe('compile', () => {
     expect(r.code).toBe(1);
     expect(r.err).toContain('invalid config');
   });
+  it('stdout, --out, and the schedule JSON embed byte-identical prompt text (single trailing newline, not doubled)', async () => {
+    const io = mockIO();
+    await run(['init', '--repo', 'acme/widget', '--out', 'c.json'], io);
+
+    const stdoutResult = await run(['compile', 'c.json'], io);
+    expect(stdoutResult.out.endsWith('\n\n')).toBe(false);
+    expect(stdoutResult.out.endsWith('\n')).toBe(true);
+    const fromStdout = stdoutResult.out; // sink.log() is compile's only call, so out *is* the prompt
+
+    await run(['compile', 'c.json', '--out', 'PROMPT.md'], io);
+    const fromFile = io.files['PROMPT.md'];
+
+    const scheduleResult = await run(['schedule', 'c.json'], io);
+    const fromSchedule = JSON.parse(scheduleResult.out).job_config.ccr.events[0].data.message.content as string;
+
+    expect(fromStdout).toBe(fromFile);
+    expect(fromStdout).toBe(fromSchedule);
+  });
 });
 
 describe('schedule', () => {
