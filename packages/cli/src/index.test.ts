@@ -97,6 +97,24 @@ describe('compile', () => {
     expect(r.code).toBe(1);
     expect(r.err).toContain('invalid config');
   });
+  it('stdout, --out, and the schedule JSON embed byte-identical prompt text (single trailing newline, not doubled)', async () => {
+    const io = mockIO();
+    await run(['init', '--repo', 'acme/widget', '--out', 'c.json'], io);
+
+    const stdoutResult = await run(['compile', 'c.json'], io);
+    expect(stdoutResult.out.endsWith('\n\n')).toBe(false);
+    expect(stdoutResult.out.endsWith('\n')).toBe(true);
+    const fromStdout = stdoutResult.out; // sink.log() is compile's only call, so out *is* the prompt
+
+    await run(['compile', 'c.json', '--out', 'PROMPT.md'], io);
+    const fromFile = io.files['PROMPT.md'];
+
+    const scheduleResult = await run(['schedule', 'c.json'], io);
+    const fromSchedule = JSON.parse(scheduleResult.out).job_config.ccr.events[0].data.message.content as string;
+
+    expect(fromStdout).toBe(fromFile);
+    expect(fromStdout).toBe(fromSchedule);
+  });
 });
 
 describe('schedule', () => {
@@ -276,6 +294,81 @@ describe('verify-entrypoints', () => {
     expect(r.code).toBe(1);
     expect(r.err).toContain('no exec()');
   });
+
+  it('--idempotency-check re-runs each command and flags a darwin-style live-then-blocked flip', async () => {
+    let darwinCalls = 0;
+    const io = mockIOWithExec(async (cmd) => {
+      if (cmd === 'npm test') return { code: 0, stdout: '98 passed', stderr: '' };
+      darwinCalls += 1;
+      if (darwinCalls === 1) return { code: 0, stdout: 'g1_v0 scored', stderr: '' };
+      return { code: 1, stdout: '', stderr: 'Error: darwin: autonomous or generated child id already exists: g1_v0' };
+    }, { 'dream.config.json': cfgJson });
+    const r = await run(['verify-entrypoints', '--idempotency-check'], io);
+    expect(r.out).toContain('darwin: live');
+    expect(r.out).toContain('darwin: NOT IDEMPOTENT');
+    expect(r.code).toBe(1); // idempotency failure scores like `blocked`
+  });
+
+  it('without --idempotency-check, runs each command once and never reports NOT IDEMPOTENT', async () => {
+    let darwinCalls = 0;
+    const io = mockIOWithExec(async (cmd) => {
+      if (cmd === 'npm test') return { code: 0, stdout: '98 passed', stderr: '' };
+      darwinCalls += 1;
+      return { code: 0, stdout: 'g1_v0 scored', stderr: '' };
+    }, { 'dream.config.json': cfgJson });
+    const r = await run(['verify-entrypoints'], io);
+    expect(darwinCalls).toBe(1);
+    expect(r.out).not.toContain('NOT IDEMPOTENT');
+  });
+});
+
+describe('verify-supply-chain', () => {
+  const cfgJson = JSON.stringify({
+    repo: 'o/n',
+    cron: '0 9 * * *',
+    slots: [{ deep: 'd', scan: ['a', 'b'] }],
+    evaluatorEntrypoints: { bench: 'npm test', darwin: 'npx @metaharness/darwin evolve --sandbox real' },
+  });
+
+  it('flags an unpinned npx entrypoint and exits 1 (reproduces this repo\'s real darwin entrypoint)', async () => {
+    const r = await run(['verify-supply-chain'], mockIO({ 'dream.config.json': cfgJson }));
+    expect(r.out).toContain('bench: not-applicable');
+    expect(r.out).toContain('darwin: unpinned');
+    expect(r.code).toBe(1);
+  });
+
+  it('exits 0 once the entrypoint is version-pinned', async () => {
+    const pinned = JSON.stringify({
+      repo: 'o/n',
+      cron: '0 9 * * *',
+      slots: [{ deep: 'd', scan: ['a', 'b'] }],
+      evaluatorEntrypoints: { bench: 'npm test', darwin: 'npx @metaharness/darwin@0.10.2 evolve --sandbox real' },
+    });
+    const r = await run(['verify-supply-chain'], mockIO({ 'dream.config.json': pinned }));
+    expect(r.out).toContain('darwin: pinned');
+    expect(r.code).toBe(0);
+  });
+
+  it('requires no exec() on the IO — static analysis only', async () => {
+    const io: IO = { ...mockIO({ 'dream.config.json': cfgJson }) };
+    delete (io as { exec?: unknown }).exec;
+    const r = await run(['verify-supply-chain'], io);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('darwin: unpinned');
+  });
+
+  it('reads a config path given as the first positional', async () => {
+    const r = await run(['verify-supply-chain', 'custom.json'], mockIO({ 'custom.json': cfgJson }));
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('darwin: unpinned');
+  });
+
+  it('reports no entrypoints declared and exits 0 for an empty evaluatorEntrypoints', async () => {
+    const empty = JSON.stringify({ repo: 'o/n', cron: '0 9 * * *', slots: [{ deep: 'd', scan: ['a', 'b'] }] });
+    const r = await run(['verify-supply-chain'], mockIO({ 'dream.config.json': empty }));
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('declares no evaluatorEntrypoints');
+  });
 });
 
 describe('tui', () => {
@@ -296,5 +389,48 @@ describe('tui', () => {
     for (let i = 0; i < 14; i++) md = appendRow(md, sampleRow({ pr: `#${i}`, verdict: 'INCONCLUSIVE' }));
     const frame = renderDashboard(md, { noColor: true });
     expect(frame).toContain('zero merges');
+  });
+});
+
+// This repo's own prompt compiler locks its output with a self-referential
+// golden-snapshot test (2026-09-10, packages/compile) so config→prompt drift
+// becomes a reviewable diff instead of a silent divergence. That report's own
+// "3 concrete next steps" flagged that the CLI's machine-readable outputs
+// (`ledger signals`'s JSON, `verify-entrypoints`'s per-line format) had no
+// equivalent — every test above asserts only a substring or a property, never
+// the full shape, so a format change (a renamed JSON key, a reordered line)
+// could land with every existing assertion still green. These two tests close
+// that gap for this rotation's `golden-snapshots` scan.
+describe('golden-snapshot: CLI machine-readable output shapes', () => {
+  it('ledger signals: JSON shape is stable for a fixed ledger fixture', async () => {
+    let md = emptyLedger();
+    const fixture: Array<Partial<LedgerRow>> = [
+      { date: '2026-08-13', deep: 'security-adversarial', finding: 'f1', pr: '#1', verdict: 'ACCEPT' },
+      { date: '2026-08-14', deep: 'security-adversarial', finding: 'f1', pr: '#2', verdict: 'ACCEPT' },
+      { date: '2026-08-15', deep: 'security-adversarial', finding: 'f1', pr: '#3', verdict: 'REJECT' },
+    ];
+    for (const row of fixture) md = appendRow(md, sampleRow(row));
+    const r = await run(['ledger', 'signals', '--path', 'L.md'], mockIO({ 'L.md': md }));
+    expect(r.code).toBe(0);
+    expect(r.out).toMatchSnapshot();
+  });
+
+  it('verify-entrypoints: per-line output format is stable for a fixed mock IO', async () => {
+    const cfgJson = JSON.stringify({
+      repo: 'o/n',
+      cron: '0 9 * * *',
+      slots: [{ deep: 'd', scan: ['a', 'b'] }],
+      evaluatorEntrypoints: { bench: 'npm test', darwin: 'npx @metaharness/darwin evolve --sandbox real' },
+    });
+    const io: IO = {
+      ...mockIO({ 'dream.config.json': cfgJson }),
+      exec: async (cmd) =>
+        cmd === 'npm test'
+          ? { code: 0, stdout: '98 passed', stderr: '' }
+          : { code: 1, stdout: '', stderr: 'npm error could not determine executable to run' },
+    };
+    const r = await run(['verify-entrypoints'], io);
+    expect(r.code).toBe(1);
+    expect(r.out).toMatchSnapshot();
   });
 });

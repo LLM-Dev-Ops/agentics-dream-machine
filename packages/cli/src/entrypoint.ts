@@ -50,10 +50,60 @@ export function classifyEntrypointResult(r: ExecResult): EntrypointCheck {
   return { verdict: 'live', code: r.code, reason: 'produced output' };
 }
 
+export interface IdempotencyCheck {
+  idempotent: boolean;
+  reason: string;
+}
+
+/**
+ * Compare two classifications of the *same* entrypoint command, run back-to-back.
+ * Pure — no I/O.
+ *
+ * Reproduced 2026-09-22 (evaluation-adapters night, SCAN=darwin): running this
+ * repo's own configured darwin entrypoint (`npx @metaharness/darwin evolve
+ * --sandbox real`) classifies `live` on a first, clean-state invocation, but the
+ * package writes unignored variant state to `./--sandbox/.metaharness/...` and
+ * refuses to reuse a generated child id — so the *identical* command classifies
+ * `blocked` (`darwin: autonomous or generated child id already exists: g1_v0`)
+ * on every run after the first. A single-shot classification can't tell a truly
+ * live entrypoint from one that only worked once; only comparing two back-to-back
+ * runs surfaces that.
+ */
+export function classifyIdempotency(first: EntrypointCheck, second: EntrypointCheck): IdempotencyCheck {
+  if (first.verdict !== second.verdict) {
+    return {
+      idempotent: false,
+      reason:
+        `first run classified '${first.verdict}' (${first.reason}), second run classified ` +
+        `'${second.verdict}' (${second.reason}) — entrypoint is stateful/non-reproducible; ` +
+        `do not trust a single-shot 'live' verdict`,
+    };
+  }
+  return { idempotent: true, reason: `both runs classified '${first.verdict}'` };
+}
+
+/**
+ * Map a verdict to the scriptable exit code ADR-0002 defines (live=0 < blocked=1 <
+ * suspicious-silent=2, so `Math.max` over several results yields the worst one). Extracted
+ * 2026-09-27: `verify-entrypoint` and `verify-entrypoints` (packages/cli/src/index.ts) each
+ * duplicated this exact ternary — flagged as a non-blocking follow-up in the 2026-09-08
+ * report ("extract a shared helper") and left untouched by every evaluation-adapters night
+ * since (#18, #26, #35). Pure — no I/O.
+ */
+export function entrypointExitCode(verdict: EntrypointVerdict): number {
+  return verdict === 'live' ? 0 : verdict === 'blocked' ? 1 : 2;
+}
+
 /** One configured evaluator entrypoint's classification, labelled with its config key + command. */
 export interface ConfiguredEntrypointResult extends EntrypointCheck {
   label: string;
   cmd: string;
+  idempotency?: IdempotencyCheck;
+}
+
+export interface ClassifyConfiguredEntrypointsOptions {
+  /** Run each command twice back-to-back and flag entrypoints whose verdict changes between runs. */
+  idempotencyCheck?: boolean;
 }
 
 /**
@@ -63,16 +113,28 @@ export interface ConfiguredEntrypointResult extends EntrypointCheck {
  * the classifier inside the compiled prompt itself." Entries with no command are
  * skipped. Execution order follows Object.entries insertion order; each command
  * runs sequentially so a hanging entrypoint doesn't obscure which label stalled.
+ *
+ * With `opts.idempotencyCheck`, each command also runs a second time and the two
+ * verdicts are compared via {@link classifyIdempotency} — catching an entrypoint
+ * that only classifies `live` because it happens to be running for the first time
+ * (see that function's doc for the darwin reproduction this guards against).
  */
 export async function classifyConfiguredEntrypoints(
   entrypoints: Record<string, string | undefined>,
   exec: (cmd: string) => Promise<ExecResult>,
+  opts: ClassifyConfiguredEntrypointsOptions = {},
 ): Promise<ConfiguredEntrypointResult[]> {
   const results: ConfiguredEntrypointResult[] = [];
   for (const [label, cmd] of Object.entries(entrypoints)) {
     if (!cmd) continue;
     const r = await exec(cmd);
-    results.push({ label, cmd, ...classifyEntrypointResult(r) });
+    const check = classifyEntrypointResult(r);
+    let idempotency: IdempotencyCheck | undefined;
+    if (opts.idempotencyCheck) {
+      const r2 = await exec(cmd);
+      idempotency = classifyIdempotency(check, classifyEntrypointResult(r2));
+    }
+    results.push({ label, cmd, ...check, idempotency });
   }
   return results;
 }

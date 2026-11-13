@@ -1,0 +1,120 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/LLM-Dev-Ops/agentics-dream-machine/blob/main/packages/compile/dream.config.schema.json",
+  "title": "DreamConfig",
+  "description": "Schema for dream.config.json, the per-repo delta set that packages/compile compiles into the nightly Dream Machine routine. Mirrors the DreamConfig interface and validateConfig() rules in packages/compile/src/config.ts — keep both in sync by hand; packages/compile/src/dream-config-schema.test.ts fails if they drift.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["repo", "cron", "slots"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Points editors at this file for autocomplete/validation. Not a DreamConfig field."
+    },
+    "repo": {
+      "type": "string",
+      "pattern": "^[\\w.-]+/[\\w.-]+$",
+      "description": "Target repo, \"owner/name\"."
+    },
+    "cron": {
+      "type": "string",
+      "description": "5-field UTC cron. The minute field must be a single fixed value (0-59) — minimum interval is 1 hour. validateConfig() trims surrounding whitespace before checking, so the pattern allows it too.",
+      "pattern": "^\\s*(?:[0-9]|[1-5][0-9])\\s+\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s*$"
+    },
+    "slots": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Rotation slots, keyed by date % slots.length.",
+      "items": {
+        "type": "object",
+        "required": ["deep", "scan"],
+        "additionalProperties": false,
+        "properties": {
+          "deep": { "type": "string", "description": "The deep-dive surface for this rotation slot." },
+          "scan": {
+            "type": "array",
+            "description": "Two lighter scan surfaces.",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    },
+    "bonusModuli": {
+      "type": "object",
+      "description": "Bonus deep-dives keyed by day-of-year modulus, e.g. { \"25\": \"vertical-packs\" }.",
+      "propertyNames": { "pattern": "^\\d+$" },
+      "additionalProperties": { "type": "string" }
+    },
+    "controlPlaneProbes": {
+      "type": "array",
+      "description": "Shell probes for STEP 0.5 control-plane discovery.",
+      "items": { "type": "string" }
+    },
+    "buildStep": {
+      "type": "object",
+      "description": "Optional build step run before discovery.",
+      "required": ["cmd"],
+      "additionalProperties": false,
+      "properties": {
+        "cmd": { "type": "string", "description": "Shell command to build the checkout, e.g. \"npm ci && npm run build\"." },
+        "degradeOnWasmFailure": {
+          "type": "boolean",
+          "description": "If true, a wasm/NAPI build failure is a recorded degradation, not a stop."
+        }
+      }
+    },
+    "evaluatorEntrypoints": {
+      "type": "object",
+      "description": "Where the real evaluators live.",
+      "additionalProperties": false,
+      "properties": {
+        "bench": { "type": "string", "description": "Command/glob for the benchmark corpus, e.g. an experiments run script." },
+        "flywheel": { "type": "string", "description": "Flywheel gate entrypoint, if the target ships one." },
+        "darwin": { "type": "string", "description": "Darwin evolution entrypoint." },
+        "redblue": { "type": "string", "description": "Red/blue adversarial entrypoint." }
+      }
+    },
+    "adrConvention": {
+      "description": "ADR numbering + directory convention for STEP 19.",
+      "oneOf": [
+        { "enum": ["3-digit", "4-digit"] },
+        {
+          "type": "object",
+          "required": ["pad", "dir"],
+          "additionalProperties": false,
+          "properties": {
+            "pad": { "type": "integer" },
+            "dir": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "competitors": {
+      "type": "array",
+      "description": "Competitor list injected into STEP 3 research.",
+      "items": { "type": "string" }
+    },
+    "extraDisciplines": {
+      "type": "array",
+      "description": "Extra repo-specific disciplines (e.g. \"adr-250-proof-ladder\").",
+      "items": { "type": "string" }
+    },
+    "ledgerPath": {
+      "type": "string",
+      "description": "Path to the durable ledger. Default docs/dream-cycle/LEDGER.md."
+    },
+    "branchPrefix": {
+      "type": "string",
+      "description": "Branch prefix for candidate branches. Default \"dream/\"."
+    },
+    "labels": {
+      "type": "array",
+      "description": "Issue labels. Default [\"dream-cycle\",\"research\"].",
+      "items": { "type": "string" }
+    },
+    "autoMerge": {
+      "type": "boolean",
+      "description": "If true, the guarded auto-merge policy is described in the PR step."
+    }
+  }
+}

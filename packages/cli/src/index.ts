@@ -18,7 +18,13 @@ import {
 import { stamp, verify, verifySteps } from '@dream-machine/witness';
 import { serializeRoutine, scheduleInstructions } from '@dream-machine/schedule';
 import { renderDashboard } from './tui.js';
-import { classifyEntrypointResult, classifyConfiguredEntrypoints, type ExecResult } from './entrypoint.js';
+import {
+  classifyEntrypointResult,
+  classifyConfiguredEntrypoints,
+  entrypointExitCode,
+  type ExecResult,
+} from './entrypoint.js';
+import { assessConfiguredSupplyChain } from './supplychain.js';
 
 export const VERSION = '0.1.1';
 
@@ -97,7 +103,10 @@ Commands:
   witness stamp   <report-file> <commit>               Compute the witness triple
   witness verify  <report-file> <commit> <witness>     Verify a claimed witness
   verify-entrypoint <label> --cmd "<command>"           Classify an evaluator entrypoint's liveness
-  verify-entrypoints [config]                           Classify every evaluatorEntrypoints in a dream.config
+  verify-entrypoints [config] [--idempotency-check]     Classify every evaluatorEntrypoints in a dream.config
+                                                         (--idempotency-check re-runs each cmd once more and
+                                                         flags one whose verdict changes between runs)
+  verify-supply-chain [config]                          Flag unpinned npx evaluatorEntrypoints (no exec required)
   tui             [--path LEDGER.md] [--no-color]      Render the dashboard
   version | --version                                  Print version
   help    | --help                                     This help
@@ -155,7 +164,13 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
           await io.writeFile(out, prompt);
           sink.log(`compiled ${cfg.repo} → ${out} (${prompt.length} bytes)`);
         } else {
-          sink.log(prompt);
+          // compile() already ends its template in exactly one trailing "\n"
+          // (so --out files and the schedule JSON's embedded prompt have a
+          // single trailing newline); sink.log() unconditionally appends its
+          // own "\n", so logging `prompt` verbatim double-newlines stdout.
+          // Strip the template's own trailing newline so printed output
+          // matches --out / `schedule` byte-for-byte.
+          sink.log(prompt.replace(/\n$/, ''));
         }
         return { code: 0, out: sink.out, err: sink.err };
       }
@@ -293,8 +308,7 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
         const result = await io.exec(cmd);
         const check = classifyEntrypointResult(result);
         sink.log(`${label}: ${check.verdict} (exit ${check.code}) — ${check.reason}`);
-        const code = check.verdict === 'live' ? 0 : check.verdict === 'blocked' ? 1 : 2;
-        return { code, out: sink.out, err: sink.err };
+        return { code: entrypointExitCode(check.verdict), out: sink.out, err: sink.err };
       }
 
       case 'verify-entrypoints': {
@@ -310,13 +324,38 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
           sink.log(`verify-entrypoints: ${cfgPath} declares no evaluatorEntrypoints`);
           return { code: 0, out: sink.out, err: sink.err };
         }
-        const results = await classifyConfiguredEntrypoints(Object.fromEntries(entries), io.exec);
+        const idempotencyCheck = Boolean(flags['idempotency-check']);
+        const results = await classifyConfiguredEntrypoints(Object.fromEntries(entries), io.exec, {
+          idempotencyCheck,
+        });
         let worst = 0;
         for (const r of results) {
           sink.log(`${r.label}: ${r.verdict} (exit ${r.code}) — ${r.reason}`);
-          worst = Math.max(worst, r.verdict === 'live' ? 0 : r.verdict === 'blocked' ? 1 : 2);
+          if (r.idempotency && !r.idempotency.idempotent) {
+            sink.log(`${r.label}: NOT IDEMPOTENT — ${r.idempotency.reason}`);
+          }
+          const idempotencyScore = r.idempotency && !r.idempotency.idempotent ? 1 : 0;
+          worst = Math.max(worst, entrypointExitCode(r.verdict), idempotencyScore);
         }
         return { code: worst, out: sink.out, err: sink.err };
+      }
+
+      case 'verify-supply-chain': {
+        const cfgPath = _[1] || 'dream.config.json';
+        const cfg = await loadConfig(io, cfgPath);
+        const entrypoints = cfg.evaluatorEntrypoints ?? {};
+        const entries = Object.entries(entrypoints).filter(([, cmd]) => cmd);
+        if (entries.length === 0) {
+          sink.log(`verify-supply-chain: ${cfgPath} declares no evaluatorEntrypoints`);
+          return { code: 0, out: sink.out, err: sink.err };
+        }
+        const results = assessConfiguredSupplyChain(Object.fromEntries(entries));
+        let anyUnpinned = false;
+        for (const r of results) {
+          sink.log(`${r.label}: ${r.verdict} — ${r.reason}`);
+          if (r.verdict === 'unpinned') anyUnpinned = true;
+        }
+        return { code: anyUnpinned ? 1 : 0, out: sink.out, err: sink.err };
       }
 
       case 'tui': {

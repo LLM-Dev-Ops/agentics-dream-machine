@@ -1,4 +1,5 @@
 {
+  "$schema": "./packages/compile/dream.config.schema.json",
   "repo": "LLM-Dev-Ops/agentics-dream-machine",
   "cron": "0 9 * * *",
   "slots": [
@@ -52,7 +53,8 @@
   },
   "evaluatorEntrypoints": {
     "bench": "npm test",
-    "darwin": "npx @metaharness/darwin evolve --sandbox real"
+    "darwin": "npx --yes @metaharness/darwin@0.10.3 evolve . --sandbox real",
+    "flywheel": "npx --yes metaharness@0.4.2 flywheel help"
   },
   "adrConvention": "4-digit",
   "competitors": [
