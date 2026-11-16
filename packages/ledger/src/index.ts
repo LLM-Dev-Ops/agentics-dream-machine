@@ -147,6 +147,20 @@ export function appendRow(markdown: string, row: LedgerRow): string {
 
 const VERDICTS: readonly string[] = ['ACCEPT', 'REJECT', 'INCONCLUSIVE'];
 const EVALS: readonly string[] = ['yes', 'no', 'blocked'];
+const DATE_SHAPE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * True iff `date` is both YYYY-MM-DD shaped AND a real calendar date.
+ * The shape regex alone accepts nonsense like "2026-13-99" or "2026-02-30"
+ * (disclosed, unfixed gap from PR #22's 2026-09-14 evaluation receipt) —
+ * this round-trips through UTC Date construction to reject those too.
+ */
+export function isValidCalendarDate(date: string): boolean {
+  if (!DATE_SHAPE_RE.test(date)) return false;
+  const [y, m, d] = date.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
 
 export interface VerifyResult {
   ok: boolean;
@@ -169,8 +183,8 @@ export function verifyLedger(markdown: string): VerifyResult {
     if (r.evaluated && !EVALS.includes(r.evaluated)) {
       errors.push(`row ${i + 1}: evaluated "${r.evaluated}" not in ${EVALS.join('|')}`);
     }
-    if (r.date && !/^\d{4}-\d{2}-\d{2}$/.test(r.date)) {
-      errors.push(`row ${i + 1}: date "${r.date}" is not YYYY-MM-DD`);
+    if (r.date && !isValidCalendarDate(r.date)) {
+      errors.push(`row ${i + 1}: date "${r.date}" is not a valid calendar date (YYYY-MM-DD)`);
     }
   });
   return { ok: errors.length === 0, errors, warnings, rowCount: rows.length };
