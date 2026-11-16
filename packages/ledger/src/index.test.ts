@@ -8,6 +8,7 @@ import {
   learningSignals,
   verdictStats,
   escapeCell,
+  isValidCalendarDate,
   LEDGER_COLUMNS,
   type LedgerRow,
 } from './index.js';
@@ -106,6 +107,36 @@ describe('verifyLedger', () => {
     const r = verifyLedger('just some text, no table');
     expect(r.ok).toBe(false);
     expect(r.errors.join()).toMatch(/header/);
+  });
+
+  it('rejects shape-valid but calendar-invalid dates (month 13, day 99, Feb 30)', () => {
+    for (const bad of ['2026-13-99', '2026-02-30', '2026-00-10', '2026-04-31']) {
+      const l = appendRow(emptyLedger(), row({ date: bad }));
+      const r = verifyLedger(l);
+      expect(r.ok).toBe(false);
+      expect(r.errors.join()).toMatch(/date/);
+    }
+  });
+
+  it('accepts real calendar dates, including leap-day only in a leap year', () => {
+    const l = appendRow(appendRow(emptyLedger(), row({ date: '2024-02-29' })), row({ date: '2026-02-28' }));
+    expect(verifyLedger(l).ok).toBe(true);
+    const nonLeap = appendRow(emptyLedger(), row({ date: '2026-02-29' }));
+    expect(verifyLedger(nonLeap).ok).toBe(false);
+  });
+});
+
+describe('isValidCalendarDate', () => {
+  it('accepts well-formed real dates', () => {
+    expect(isValidCalendarDate('2026-08-13')).toBe(true);
+    expect(isValidCalendarDate('2024-02-29')).toBe(true);
+  });
+
+  it('rejects shape-invalid and calendar-invalid strings', () => {
+    expect(isValidCalendarDate('yesterday')).toBe(false);
+    expect(isValidCalendarDate('2026-13-99')).toBe(false);
+    expect(isValidCalendarDate('2026-02-30')).toBe(false);
+    expect(isValidCalendarDate('2026-2-9')).toBe(false); // not zero-padded
   });
 });
 
