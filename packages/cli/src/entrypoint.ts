@@ -59,10 +59,11 @@ export interface ConfiguredEntrypointResult extends EntrypointCheck {
 /**
  * Run every configured evaluatorEntrypoints command (e.g. from dream.config.json)
  * through {@link classifyEntrypointResult}. This is the wiring ADR-0002 §3 named
- * and explicitly deferred: "does not yet auto-wire evaluatorEntrypoints through
- * the classifier inside the compiled prompt itself." Entries with no command are
- * skipped. Execution order follows Object.entries insertion order; each command
- * runs sequentially so a hanging entrypoint doesn't obscure which label stalled.
+ * and (as of packages/compile/src/index.ts's step6to9Candidate) the compiled
+ * nightly prompt itself now instructs the agent to invoke, rather than leaving
+ * it an undiscovered opt-in CLI primitive. Entries with no command are skipped.
+ * Execution order follows Object.entries insertion order; each command runs
+ * sequentially so a hanging entrypoint doesn't obscure which label stalled.
  */
 export async function classifyConfiguredEntrypoints(
   entrypoints: Record<string, string | undefined>,

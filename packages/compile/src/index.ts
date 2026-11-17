@@ -236,10 +236,17 @@ benchmarks; every quantitative claim carries its evidence grade.`;
 }
 
 function step6to9Candidate(ev: DreamConfig['evaluatorEntrypoints']): string {
-  const evLines = Object.entries(ev ?? {})
-    .filter(([, val]) => val)
-    .map(([k, val]) => `- ${k}: \`${val}\``)
-    .join('\n');
+  const configured = Object.entries(ev ?? {}).filter(([, val]) => val);
+  const evLines = configured.map(([k, val]) => `- ${k}: \`${val}\``).join('\n');
+  const livenessGate = configured.length
+    ? `\n\nBefore trusting any entrypoint above, classify it with this repo's own
+liveness check: run \`dream-machine verify-entrypoints\` (wraps every configured
+\`evaluatorEntrypoints\` command through \`classifyEntrypointResult\`) and only
+treat a \`live\` verdict as license to proceed. A \`blocked\` or
+\`suspicious-silent\` verdict is itself evidence, not a reason to retry until it
+looks live — do not record \`EVALUATED=yes\` from an entrypoint that has not
+cleared this gate.`
+    : '';
   return `# STEP 5–9: TESTABILITY GATE → CANDIDATE → BASELINE → EVALUATION
 
 If the finding is not testable tonight: \`EVALUATED=no / VERDICT=INCONCLUSIVE /
@@ -249,7 +256,7 @@ change), locate the committed benchmark corpus, evaluate the PARENT first on the
 real evaluator, then the candidate on the identical corpus/policy.
 
 Evaluator entrypoints for this repo:
-${evLines || '- (discover at runtime — none pinned in config)'}
+${evLines || '- (discover at runtime — none pinned in config)'}${livenessGate}
 
 Do not infer results from logs. Preserve the real receipt. If evaluation is
 blocked by infrastructure/credentials: \`EVALUATED=blocked / VERDICT=INCONCLUSIVE\`
