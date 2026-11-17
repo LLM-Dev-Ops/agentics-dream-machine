@@ -85,6 +85,18 @@ describe('compile', () => {
     expect(prompt).toContain('adr-250-proof-ladder');
   });
 
+  it('instructs the agent to classify configured entrypoints via verify-entrypoints before trusting them', () => {
+    expect(prompt).toContain('dream-machine verify-entrypoints');
+    expect(prompt).toContain('classifyEntrypointResult');
+    expect(prompt).toMatch(/do not record `EVALUATED=yes` from an entrypoint that has not\ncleared this gate/);
+  });
+
+  it('omits the liveness-gate instruction when no evaluatorEntrypoints are configured', () => {
+    const p = compile({ ...metaharness, evaluatorEntrypoints: {} });
+    expect(p).toContain('(discover at runtime — none pinned in config)');
+    expect(p).not.toContain('dream-machine verify-entrypoints');
+  });
+
   it('uses the 3-digit ADR convention when configured', () => {
     expect(prompt).toContain('ADR-00N'); // pad 3 → two zeros + N
     expect(prompt).toContain('3-digit padding');
