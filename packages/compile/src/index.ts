@@ -198,7 +198,15 @@ nights), \`${adrDir}/\` (the decision memory — read INDEX and recent ADRs for 
 selected surface), any committed benchmark corpora, prior receipts, prior
 lineage, prior rejected candidates. Do not rediscover a failed direction unless
 new evidence justifies reopening it. Optionally consult the read-only collective
-memory at \`https://pi.ruv.io\` (never write to it).`;
+memory at \`https://pi.ruv.io\` (never write to it).
+
+Before freezing tonight's hypothesis (STEP 3.3), check GitHub directly for
+overlap: list open issues/PRs whose title, labels, or body reference tonight's
+candidate direction. GitHub issue/PR history is the authoritative record of
+prior work — more current than a possibly-stale local ledger. If a clean-
+mergeable duplicate or superset already exists, withhold tonight's candidate
+(docs/ledger only) and recommend merging the existing PR instead of
+reimplementing it.`;
 }
 
 function step3Research(competitors: string[]): string {
