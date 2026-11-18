@@ -104,6 +104,14 @@ describe('compile', () => {
     }
   });
 
+  it('instructs a pre-freeze GitHub overlap check before the hypothesis is frozen', () => {
+    expect(prompt).toMatch(/check GitHub directly for\s+overlap/);
+    expect(prompt).toContain("withhold tonight's candidate");
+    expect(prompt.indexOf("Before freezing tonight's hypothesis")).toBeLessThan(
+      prompt.indexOf('STEP 3.3 / 4'),
+    );
+  });
+
   it('describes human-review-only merge policy by default', () => {
     expect(prompt).toContain('Human review required');
     expect(prompt).not.toContain('guarded auto-merge ENABLED');
