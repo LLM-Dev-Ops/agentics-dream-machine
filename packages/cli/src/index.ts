@@ -19,6 +19,7 @@ import { stamp, verify, verifySteps } from '@dream-machine/witness';
 import { serializeRoutine, scheduleInstructions } from '@dream-machine/schedule';
 import { renderDashboard } from './tui.js';
 import { classifyEntrypointResult, classifyConfiguredEntrypoints, type ExecResult } from './entrypoint.js';
+import { classifyOverlap, type OverlapItem } from './overlap.js';
 
 export const VERSION = '0.1.1';
 
@@ -98,6 +99,7 @@ Commands:
   witness verify  <report-file> <commit> <witness>     Verify a claimed witness
   verify-entrypoint <label> --cmd "<command>"           Classify an evaluator entrypoint's liveness
   verify-entrypoints [config]                           Classify every evaluatorEntrypoints in a dream.config
+  check-overlap --keywords "a,b,c" [--threshold N] FILE Classify candidate-keyword overlap against a JSON issue/PR list
   tui             [--path LEDGER.md] [--no-color]      Render the dashboard
   version | --version                                  Print version
   help    | --help                                     This help
@@ -317,6 +319,41 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
           worst = Math.max(worst, r.verdict === 'live' ? 0 : r.verdict === 'blocked' ? 1 : 2);
         }
         return { code: worst, out: sink.out, err: sink.err };
+      }
+
+      case 'check-overlap': {
+        const file = _[1];
+        const keywordsArg = flags.keywords as string | undefined;
+        if (!file || !keywordsArg) {
+          sink.error('usage: dream-machine check-overlap --keywords "a,b,c" [--threshold N] <items.json>');
+          return { code: 1, out: sink.out, err: sink.err };
+        }
+        const keywords = keywordsArg
+          .split(',')
+          .map((k) => k.trim())
+          .filter((k) => k.length > 0);
+        const threshold = flags.threshold !== undefined ? Number(flags.threshold) : 0.5;
+        if (Number.isNaN(threshold)) {
+          sink.error(`check-overlap: --threshold must be a number, got ${JSON.stringify(flags.threshold)}`);
+          return { code: 1, out: sink.out, err: sink.err };
+        }
+        let items: OverlapItem[];
+        try {
+          items = JSON.parse(await io.readFile(file)) as OverlapItem[];
+        } catch (e) {
+          sink.error(`check-overlap: could not read/parse ${file} as a JSON array of {number, title, body?}: ${(e as Error).message}`);
+          return { code: 1, out: sink.out, err: sink.err };
+        }
+        const result = classifyOverlap(keywords, items, threshold);
+        if (result.verdict === 'clear') {
+          sink.log(`clear — no prior issue/PR matched >= ${threshold * 100}% of [${keywords.join(', ')}]`);
+          return { code: 0, out: sink.out, err: sink.err };
+        }
+        sink.log(`overlap — ${result.matches.length} prior issue/PR(s) matched >= ${threshold * 100}% of [${keywords.join(', ')}]:`);
+        for (const m of result.matches) {
+          sink.log(`  #${m.number} (${Math.round(m.score * 100)}%): ${m.title} — matched [${m.matchedKeywords.join(', ')}]`);
+        }
+        return { code: 1, out: sink.out, err: sink.err };
       }
 
       case 'tui': {

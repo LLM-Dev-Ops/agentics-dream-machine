@@ -278,6 +278,58 @@ describe('verify-entrypoints', () => {
   });
 });
 
+describe('check-overlap', () => {
+  const items = JSON.stringify([
+    { number: 18, title: 'pin the unpinned darwin npx entrypoint', body: 'adds an exact version pin' },
+    { number: 40, title: 'tui pad() ANSI-safe truncation', body: 'fixes raw ANSI slicing' },
+  ]);
+
+  it('exits 1 and reports matches when candidate keywords overlap a prior issue/PR', async () => {
+    const io = mockIO({ 'items.json': items });
+    const r = await run(['check-overlap', '--keywords', 'darwin,pin,version', 'items.json'], io);
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('overlap —');
+    expect(r.out).toContain('#18');
+    expect(r.out).not.toContain('#40');
+  });
+
+  it('exits 0 and reports clear when no prior issue/PR matches', async () => {
+    const io = mockIO({ 'items.json': items });
+    const r = await run(['check-overlap', '--keywords', 'ledger,calendar,epochday', 'items.json'], io);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('clear —');
+  });
+
+  it('honors a custom --threshold', async () => {
+    const io = mockIO({ 'items.json': items });
+    const strict = await run(['check-overlap', '--keywords', 'darwin,pin,version,npx,credential', '--threshold', '1', 'items.json'], io);
+    expect(strict.code).toBe(0); // "credential" never occurs in item #18's text, so only 4/5 (80%) < 100%
+  });
+
+  it('errors on missing --keywords or file positional', async () => {
+    const r1 = await run(['check-overlap', 'items.json'], mockIO({ 'items.json': items }));
+    expect(r1.code).toBe(1);
+    expect(r1.err).toContain('usage: dream-machine check-overlap');
+
+    const r2 = await run(['check-overlap', '--keywords', 'darwin'], mockIO({ 'items.json': items }));
+    expect(r2.code).toBe(1);
+    expect(r2.err).toContain('usage: dream-machine check-overlap');
+  });
+
+  it('errors on a non-numeric --threshold', async () => {
+    const io = mockIO({ 'items.json': items });
+    const r = await run(['check-overlap', '--keywords', 'darwin', '--threshold', 'high', 'items.json'], io);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('--threshold must be a number');
+  });
+
+  it('errors when the file is missing or not valid JSON', async () => {
+    const r = await run(['check-overlap', '--keywords', 'darwin', 'missing.json'], mockIO());
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('could not read/parse');
+  });
+});
+
 describe('tui', () => {
   it('renders a dashboard from a ledger', async () => {
     const md = appendRow(emptyLedger(), sampleRow());
