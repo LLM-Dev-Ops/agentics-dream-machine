@@ -74,6 +74,18 @@ describe('init', () => {
     expect(r.code).toBe(0);
     expect(JSON.parse(io.files['dream.config.json']).repo).toBe('acme/widget');
   });
+  it('rejects a --repo that is not "owner/name" instead of scaffolding an unusable config', async () => {
+    const r = await run(['init', '--repo', 'notarepo'], mockIO());
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('invalid --repo');
+    expect(r.out).toBe('');
+  });
+  it('rejects an invalid --repo before writing --out', async () => {
+    const io = mockIO();
+    const r = await run(['init', '--repo', 'notarepo', '--out', 'dream.config.json'], io);
+    expect(r.code).toBe(1);
+    expect(io.files['dream.config.json']).toBeUndefined();
+  });
 });
 
 describe('compile', () => {

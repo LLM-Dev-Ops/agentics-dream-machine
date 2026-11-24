@@ -130,6 +130,11 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
       case 'init': {
         const repo = (flags.repo as string) || 'owner/name';
         const cfg = defaultConfig(repo);
+        const v = validateConfig(cfg);
+        if (!v.ok) {
+          sink.error(`invalid --repo ${JSON.stringify(repo)}:\n  - ${v.errors.join('\n  - ')}`);
+          return { code: 1, out: sink.out, err: sink.err };
+        }
         const json = JSON.stringify(cfg, null, 2);
         const out = (flags.out as string) || '';
         if (out) {
