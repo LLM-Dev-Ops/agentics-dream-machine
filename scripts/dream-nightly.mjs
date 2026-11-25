@@ -19,9 +19,9 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { validateConfig } from '@dream-machine/compile';
 
 const DRY = process.argv.includes('--dry-run');
-const CONFIG = process.env.DREAM_CONFIG || 'dream.config.json';
 const MODEL = process.env.OPENROUTER_MODEL || 'openai/gpt-4o-mini';
 const KEY = process.env.OPENROUTER_API_KEY || '';
 const LEDGER = 'docs/dream-cycle/LEDGER.md';
@@ -33,14 +33,26 @@ function shSafe(cmd, args) {
   try { return sh(cmd, args); } catch { return ''; }
 }
 
-function tonight() {
+/**
+ * Parses + validates dream.config.json and picks tonight's slot. Returns
+ * `{ invalid: true, errors }` instead of throwing on a schema violation —
+ * the caller still owes STEP 25 a ledger row (every run, even a halt), which
+ * an uncaught throw here used to skip silently (main()'s top-level .catch
+ * exits 1 before the ledger-append step is ever reached).
+ */
+export function tonight() {
+  const CONFIG = process.env.DREAM_CONFIG || 'dream.config.json';
   const cfg = JSON.parse(readFileSync(CONFIG, 'utf8'));
   const date = process.env.DREAM_DATE || new Date().toISOString().slice(0, 10);
+  const commit = shSafe('git', ['rev-parse', 'HEAD']) || '0'.repeat(40);
+  const v = validateConfig(cfg);
+  if (!v.ok) {
+    return { invalid: true, errors: v.errors, cfg, date, commit };
+  }
   const dayint = Number(date.replace(/-/g, ''));
   const slot = dayint % cfg.slots.length;
   const { deep, scan } = cfg.slots[slot];
-  const commit = shSafe('git', ['rev-parse', 'HEAD']) || '0'.repeat(40);
-  return { cfg, date, slot, deep, scan, commit };
+  return { invalid: false, cfg, date, slot, deep, scan, commit };
 }
 
 async function research(ctx) {
@@ -100,6 +112,21 @@ function witness(reportPath, commit) {
 
 async function main() {
   const ctx = tonight();
+  if (ctx.invalid) {
+    console.log(`Tonight: DATE=${ctx.date} COMMIT=${ctx.commit.slice(0, 8)} — HALT: invalid dream.config.json`);
+    for (const e of ctx.errors) console.log(`  - ${e}`);
+    if (DRY) {
+      console.log('--- DRY RUN --- (would record HALT: invalid-config, no issue/PR)');
+      return;
+    }
+    execFileSync('node', ['packages/cli/dist/bin.js', 'ledger', 'append',
+      '--path', LEDGER, '--date', ctx.date, '--deep', 'HALT: invalid-config',
+      '--finding', ctx.errors.join('; ').slice(0, 200), '--issue', 'LOCAL', '--pr', 'NONE',
+      '--evaluated', 'no', '--verdict', 'INCONCLUSIVE', '--witness', 'none',
+      '--priorFates', 'dream.config.json failed validateConfig() before research could start'], { stdio: 'inherit' });
+    console.log(`Done. HALT: invalid-config (evaluated=no, verdict=INCONCLUSIVE).`);
+    return;
+  }
   console.log(`Tonight: DATE=${ctx.date} DEEP=${ctx.deep} SCAN=${(ctx.scan || []).join(',')} SLOT=${ctx.slot} COMMIT=${ctx.commit.slice(0, 8)}`);
 
   const r = await research(ctx);
@@ -173,4 +200,11 @@ async function main() {
   console.log(`Done. Issue ${issueRef} (evaluated=${evaluated}, verdict=${verdict}). Witness: ${w.witness}`);
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+// Run only when invoked directly (`node scripts/dream-nightly.mjs`), not when
+// imported for testing — this script is not npx/bin-symlinked, so the plain
+// `import.meta.url` idiom is safe here (unlike the footgun ADR-0002 recorded
+// for a bin-symlinked CLI).
+const isMain = process.argv[1] && import.meta.url === new URL(process.argv[1], 'file:').href;
+if (isMain) {
+  main().catch((e) => { console.error(e); process.exit(1); });
+}
