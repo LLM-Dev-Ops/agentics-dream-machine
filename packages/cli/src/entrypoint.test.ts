@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { classifyEntrypointResult, classifyConfiguredEntrypoints } from './entrypoint.js';
+import { classifyEntrypointResult, classifyConfiguredEntrypoints, diffWorkingTree } from './entrypoint.js';
 
 describe('classifyEntrypointResult', () => {
   it('flags a nonzero exit as blocked (reproduces npx @metaharness/flywheel: no bin field)', () => {
@@ -70,5 +70,37 @@ describe('classifyConfiguredEntrypoints', () => {
     const exec = async () => ({ code: 0, stdout: '', stderr: '' });
     const results = await classifyConfiguredEntrypoints({ redblue: 'npx @metaharness/redblue' }, exec);
     expect(results[0].verdict).toBe('suspicious-silent');
+  });
+});
+
+describe('diffWorkingTree', () => {
+  it('returns [] when nothing changed', () => {
+    expect(diffWorkingTree('', '')).toEqual([]);
+    expect(diffWorkingTree('?? foo/\n', '?? foo/\n')).toEqual([]);
+  });
+
+  it('reproduces the real darwin entrypoint leaving a stray `--sandbox/` tree behind', () => {
+    // Exact reproduction, 2026-11-26: `npx @metaharness/darwin evolve --sandbox real`
+    // (this repo's own configured `darwin` entrypoint) wrote `--sandbox/.metaharness/...`
+    // straight into the repo root on a clean checkout.
+    const before = '';
+    const after = '?? --sandbox/\n';
+    expect(diffWorkingTree(before, after)).toEqual(['--sandbox']);
+  });
+
+  it('reports only top-level new paths, de-duplicated and sorted, ignoring pre-existing ones', () => {
+    const before = '?? old-untracked/\n';
+    const after = ' M old-untracked/file.ts\n?? new-dir/a.ts\n?? new-dir/b.ts\n?? zeta.log\n';
+    expect(diffWorkingTree(before, after)).toEqual(['new-dir', 'zeta.log']);
+  });
+
+  it('follows rename arrows (`old -> new`) to the new path', () => {
+    const before = '';
+    const after = 'R  old-name.ts -> renamed.ts\n';
+    expect(diffWorkingTree(before, after)).toEqual(['renamed.ts']);
+  });
+
+  it('ignores blank lines and lines too short to carry a path', () => {
+    expect(diffWorkingTree('', '\n\n?? x\n')).toEqual(['x']);
   });
 });

@@ -50,6 +50,45 @@ export function classifyEntrypointResult(r: ExecResult): EntrypointCheck {
   return { verdict: 'live', code: r.code, reason: 'produced output' };
 }
 
+/**
+ * Diff two `git status --porcelain` snapshots and return the top-level paths
+ * that are new in `after` but absent from `before` — i.e. paths a command
+ * created as a side effect of running it. Pure — no I/O.
+ *
+ * Reproduced 2026-11-26 (ledger-signals night; rotated to evaluation-adapters
+ * per the ledger's own "a finding repeated >=3 prior nights -> rotate to the
+ * next slot's DEEP surface" learning signal, since ledger-schema/zero-merge
+ * findings had already recurred across PRs #12/#16/#22/#30/#33/#58/#79/#99/
+ * #109/#121/#129/#139 without landing — reconfirmed live via the GitHub API
+ * this session, NOT from local `git log` or the stale 9-row `main`-branch
+ * ledger, which only goes up to PR #9 and does not itself contain these
+ * numbers; see the committed report's evidence table): this repo's own
+ * configured `darwin`
+ * entrypoint (`npx @metaharness/darwin evolve --sandbox real`) writes a
+ * non-gitignored `--sandbox/.metaharness/` state tree straight into
+ * `process.cwd()`. A second invocation in the same working tree then fails
+ * ("autonomous or generated child id already exists: g1_v0") — so merely
+ * liveness-probing this entrypoint once can poison a later real run of it in
+ * the same session, and the leftover directory is a `git add -A` /
+ * accidental-commit hazard `classifyEntrypointResult`'s exit-code-only
+ * verdict says nothing about.
+ */
+export function diffWorkingTree(beforePorcelain: string, afterPorcelain: string): string[] {
+  const topLevelPaths = (porcelain: string): Set<string> => {
+    const paths = new Set<string>();
+    for (const line of porcelain.split(/\r?\n/)) {
+      if (line.length <= 3) continue;
+      const rest = line.slice(3).split(' -> ').pop() ?? '';
+      const top = rest.trim().split('/')[0];
+      if (top) paths.add(top);
+    }
+    return paths;
+  };
+  const before = topLevelPaths(beforePorcelain);
+  const after = topLevelPaths(afterPorcelain);
+  return [...after].filter((p) => !before.has(p)).sort();
+}
+
 /** One configured evaluator entrypoint's classification, labelled with its config key + command. */
 export interface ConfiguredEntrypointResult extends EntrypointCheck {
   label: string;

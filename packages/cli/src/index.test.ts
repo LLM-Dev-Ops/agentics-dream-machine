@@ -220,6 +220,42 @@ describe('verify-entrypoint', () => {
     expect(r.code).toBe(1);
     expect(r.err).toContain('no exec()');
   });
+
+  it('warns when the entrypoint leaves new untracked paths in the working tree (real darwin repro)', async () => {
+    let gitCalls = 0;
+    const io = mockIOWithExec(async (cmd) => {
+      if (cmd === 'git status --porcelain') {
+        gitCalls += 1;
+        return { code: 0, stdout: gitCalls === 1 ? '' : '?? --sandbox/\n', stderr: '' };
+      }
+      return { code: 0, stdout: 'evolved g1_v0', stderr: '' };
+    });
+    const r = await run(['verify-entrypoint', 'darwin', '--cmd', 'npx @metaharness/darwin evolve --sandbox real'], io);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('darwin: live');
+    expect(r.out).toContain('left 1 new untracked path(s) in the working tree: --sandbox');
+    expect(r.out).toContain('not idempotent/sandboxed');
+  });
+
+  it('does not warn when the entrypoint leaves the working tree unchanged', async () => {
+    const io = mockIOWithExec(async (cmd) => {
+      if (cmd === 'git status --porcelain') return { code: 0, stdout: '?? unrelated.log\n', stderr: '' };
+      return { code: 0, stdout: 'ok', stderr: '' };
+    });
+    const r = await run(['verify-entrypoint', 'bench', '--cmd', 'npm test'], io);
+    expect(r.out).toContain('bench: live');
+    expect(r.out).not.toContain('untracked path');
+  });
+
+  it('does not warn when git itself is unavailable (snapshot fails)', async () => {
+    const io = mockIOWithExec(async (cmd) => {
+      if (cmd === 'git status --porcelain') return { code: 1, stdout: '', stderr: 'git: command not found' };
+      return { code: 0, stdout: 'ok', stderr: '' };
+    });
+    const r = await run(['verify-entrypoint', 'bench', '--cmd', 'npm test'], io);
+    expect(r.out).toContain('bench: live');
+    expect(r.out).not.toContain('untracked path');
+  });
 });
 
 describe('verify-entrypoints', () => {
@@ -275,6 +311,29 @@ describe('verify-entrypoints', () => {
     const r = await run(['verify-entrypoints'], mockIO({ 'dream.config.json': cfgJson }));
     expect(r.code).toBe(1);
     expect(r.err).toContain('no exec()');
+  });
+
+  it('warns per-entrypoint when it leaves new untracked paths, attributing the right entry', async () => {
+    let gitCallsForDarwin = 0;
+    const io = mockIOWithExec(async (cmd) => {
+      if (cmd === 'git status --porcelain') {
+        // bench's two snapshots come first (both clean), then darwin's two (dirty after).
+        gitCallsForDarwin += 1;
+        // calls 1,2 = bench's before/after (clean); 3 = darwin's before (still clean);
+        // 4 = darwin's after (dirty) — darwin, not bench, left the stray directory behind.
+        return { code: 0, stdout: gitCallsForDarwin <= 3 ? '' : '?? --sandbox/\n', stderr: '' };
+      }
+      if (cmd === 'npm test') return { code: 0, stdout: '98 passed', stderr: '' };
+      return { code: 0, stdout: 'evolved g1_v0', stderr: '' };
+    }, { 'dream.config.json': cfgJson });
+    const r = await run(['verify-entrypoints'], io);
+    expect(r.out).toContain('bench: live');
+    expect(r.out).toContain('darwin: live');
+    const lines = r.out.split('\n');
+    const benchIdx = lines.findIndex((l) => l.startsWith('bench:'));
+    const darwinIdx = lines.findIndex((l) => l.startsWith('darwin:'));
+    expect(lines[benchIdx + 1]).not.toContain('untracked path');
+    expect(lines[darwinIdx + 1]).toContain('left 1 new untracked path(s) in the working tree: --sandbox');
   });
 });
 
