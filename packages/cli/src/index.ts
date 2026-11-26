@@ -18,7 +18,12 @@ import {
 import { stamp, verify, verifySteps } from '@dream-machine/witness';
 import { serializeRoutine, scheduleInstructions } from '@dream-machine/schedule';
 import { renderDashboard } from './tui.js';
-import { classifyEntrypointResult, classifyConfiguredEntrypoints, type ExecResult } from './entrypoint.js';
+import {
+  classifyEntrypointResult,
+  classifyConfiguredEntrypoints,
+  diffWorkingTree,
+  type ExecResult,
+} from './entrypoint.js';
 
 export const VERSION = '0.1.1';
 
@@ -104,6 +109,42 @@ Commands:
 
 The Dream Machine never merges. Evaluation is not promotion — a human decides.
 Docs: https://ruvnet.github.io/dream-machine/`;
+
+/**
+ * Run `cmd` via `io.exec`, bracketed by a best-effort `git status --porcelain`
+ * snapshot, so callers can warn when an entrypoint left new untracked paths
+ * in the working tree (a `git add -A` / accidental-commit hazard — see
+ * `diffWorkingTree`'s doc comment for the reproduced `darwin` case). If `git`
+ * is unavailable or the snapshot command itself fails, side effects are
+ * silently unreported rather than blocking the entrypoint result.
+ */
+async function execWithSideEffectCheck(
+  io: IO,
+  cmd: string,
+): Promise<{ result: ExecResult; sideEffects: string[] }> {
+  const snapshot = async (): Promise<string | null> => {
+    try {
+      const r = await io.exec!('git status --porcelain');
+      return r.code === 0 ? r.stdout : null;
+    } catch {
+      return null;
+    }
+  };
+  const before = await snapshot();
+  const result = await io.exec!(cmd);
+  const after = await snapshot();
+  const sideEffects = before !== null && after !== null ? diffWorkingTree(before, after) : [];
+  return { result, sideEffects };
+}
+
+function sideEffectWarning(sideEffects: string[]): string | null {
+  if (!sideEffects.length) return null;
+  return (
+    `  ⚠ left ${sideEffects.length} new untracked path(s) in the working tree: ${sideEffects.join(', ')} — ` +
+    'this entrypoint is not idempotent/sandboxed; review before `git add`, and do not run it again from ' +
+    'this working tree without cleaning up first'
+  );
+}
 
 async function loadConfig(io: IO, path: string): Promise<DreamConfig> {
   const raw = await io.readFile(path);
@@ -290,9 +331,11 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
           sink.error('verify-entrypoint: this IO has no exec() — cannot run commands');
           return { code: 1, out: sink.out, err: sink.err };
         }
-        const result = await io.exec(cmd);
+        const { result, sideEffects } = await execWithSideEffectCheck(io, cmd);
         const check = classifyEntrypointResult(result);
         sink.log(`${label}: ${check.verdict} (exit ${check.code}) — ${check.reason}`);
+        const warning = sideEffectWarning(sideEffects);
+        if (warning) sink.log(warning);
         const code = check.verdict === 'live' ? 0 : check.verdict === 'blocked' ? 1 : 2;
         return { code, out: sink.out, err: sink.err };
       }
@@ -310,12 +353,20 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
           sink.log(`verify-entrypoints: ${cfgPath} declares no evaluatorEntrypoints`);
           return { code: 0, out: sink.out, err: sink.err };
         }
-        const results = await classifyConfiguredEntrypoints(Object.fromEntries(entries), io.exec);
+        const sideEffectsByIndex: string[][] = [];
+        const wrappedExec = async (cmd: string) => {
+          const { result, sideEffects } = await execWithSideEffectCheck(io, cmd);
+          sideEffectsByIndex.push(sideEffects);
+          return result;
+        };
+        const results = await classifyConfiguredEntrypoints(Object.fromEntries(entries), wrappedExec);
         let worst = 0;
-        for (const r of results) {
+        results.forEach((r, i) => {
           sink.log(`${r.label}: ${r.verdict} (exit ${r.code}) — ${r.reason}`);
+          const warning = sideEffectWarning(sideEffectsByIndex[i] ?? []);
+          if (warning) sink.log(warning);
           worst = Math.max(worst, r.verdict === 'live' ? 0 : r.verdict === 'blocked' ? 1 : 2);
-        }
+        });
         return { code: worst, out: sink.out, err: sink.err };
       }
 
