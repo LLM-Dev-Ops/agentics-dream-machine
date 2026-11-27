@@ -19,6 +19,7 @@ import { stamp, verify, verifySteps } from '@dream-machine/witness';
 import { serializeRoutine, scheduleInstructions } from '@dream-machine/schedule';
 import { renderDashboard } from './tui.js';
 import { classifyEntrypointResult, classifyConfiguredEntrypoints, type ExecResult } from './entrypoint.js';
+import { runFlywheelSanityProbe, classifyFlywheelProbe } from './flywheel-probe.js';
 
 export const VERSION = '0.1.1';
 
@@ -98,6 +99,7 @@ Commands:
   witness verify  <report-file> <commit> <witness>     Verify a claimed witness
   verify-entrypoint <label> --cmd "<command>"           Classify an evaluator entrypoint's liveness
   verify-entrypoints [config]                           Classify every evaluatorEntrypoints in a dream.config
+  flywheel-probe                                        Run @metaharness/flywheel's own quickstart loop, classified
   tui             [--path LEDGER.md] [--no-color]      Render the dashboard
   version | --version                                  Print version
   help    | --help                                     This help
@@ -317,6 +319,20 @@ export async function run(argv: string[], io: IO): Promise<RunResult> {
           worst = Math.max(worst, r.verdict === 'live' ? 0 : r.verdict === 'blocked' ? 1 : 2);
         }
         return { code: worst, out: sink.out, err: sink.err };
+      }
+
+      case 'flywheel-probe': {
+        let probe;
+        try {
+          probe = await runFlywheelSanityProbe();
+        } catch (e) {
+          sink.error(`flywheel: blocked (threw) — ${(e as Error).message}`);
+          return { code: 1, out: sink.out, err: sink.err };
+        }
+        const check = classifyFlywheelProbe(probe);
+        sink.log(`flywheel: ${check.verdict} (exit ${check.code}) — ${check.reason}`);
+        const code = check.verdict === 'live' ? 0 : check.verdict === 'blocked' ? 1 : 2;
+        return { code, out: sink.out, err: sink.err };
       }
 
       case 'tui': {

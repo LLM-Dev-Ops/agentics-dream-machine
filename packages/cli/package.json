@@ -35,7 +35,8 @@
     "@dream-machine/compile": "0.1.0",
     "@dream-machine/ledger": "0.1.0",
     "@dream-machine/witness": "0.1.0",
-    "@dream-machine/schedule": "0.1.0"
+    "@dream-machine/schedule": "0.1.0",
+    "@metaharness/flywheel": "0.1.15"
   },
   "keywords": [
     "dream-machine",

@@ -278,6 +278,15 @@ describe('verify-entrypoints', () => {
   });
 });
 
+describe('flywheel-probe', () => {
+  it('runs the real @metaharness/flywheel quickstart loop and reports live', async () => {
+    const r = await run(['flywheel-probe'], mockIO());
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('flywheel: live');
+    expect(r.out).toContain('3 promotion');
+  });
+});
+
 describe('tui', () => {
   it('renders a dashboard from a ledger', async () => {
     const md = appendRow(emptyLedger(), sampleRow());
